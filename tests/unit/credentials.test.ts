@@ -73,4 +73,16 @@ describe('凭据管理', () => {
       delete process.env['DATASENTRY_CRED_ERP_TOKEN']
     }
   })
+
+  it('只存在于环境变量的凭据也会被清洗', () => {
+    temp = tempPaths()
+    process.env['DATASENTRY_CRED_ONLY_IN_ENV'] = 'env-only-secret'
+    try {
+      const manager = CredentialManager.load(temp.paths)
+      expect(manager.get('only.in.env')).toBe('env-only-secret')
+      expect(manager.scrub('x env-only-secret y')).toBe('x ***redacted*** y')
+    } finally {
+      delete process.env['DATASENTRY_CRED_ONLY_IN_ENV']
+    }
+  })
 })

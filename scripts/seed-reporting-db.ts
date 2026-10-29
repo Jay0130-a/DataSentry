@@ -1,4 +1,5 @@
 import { dataPaths } from '@datasentry/core'
+import { loadLocalEnv } from '@datasentry/backend/env.ts'
 import { seedReportingDb } from '@datasentry/backend/sources/reporting-db/seed.ts'
 
 /**
@@ -7,6 +8,8 @@ import { seedReportingDb } from '@datasentry/backend/sources/reporting-db/seed.t
  * - 配了 `DATASENTRY_PG_URL`：写真实 Postgres
  * - 没配：写 `data/pg`（内嵌 PGlite，Postgres 的 WASM 构建）
  */
+// 先读 .env：DATASENTRY_PG_URL / DATASENTRY_DATA_DIR 都可能在文件里。
+loadLocalEnv()
 const paths = dataPaths()
 const connectionString = process.env['DATASENTRY_PG_URL']
 const result = await seedReportingDb({ paths })

@@ -21,6 +21,7 @@ import type { ToolCallStore } from '../runtime/tool-call-store.ts'
 import type { LoadedWorkspace } from '../workspace/loader.ts'
 import {
   computeRecipientsHash,
+  findImTargetKey,
   precheckPublish,
   type PublishChannel,
   type PublishFormat,
@@ -253,6 +254,11 @@ export class PublishService {
     })
     const updatedReport = reports.patch(report.id, { recipientsHash })
 
+    const imTargetKey =
+      request.channel === 'im'
+        ? findImTargetKey(workspace.imTargets, precheck.recipients[0] ?? '')
+        : null
+
     const args = {
       reportId: report.id,
       draftVersion: report.draftVersion,
@@ -271,9 +277,10 @@ export class PublishService {
       // args 会进 tool_call 表与事件轨迹，密钥不能出现在那里。
       ...(request.channel === 'im'
         ? {
-            imTarget: precheck.recipients[0] ?? '',
-            imCredentialKey:
-              workspace.imTargets?.[precheck.recipients[0] ?? '']?.credentialKey ?? '',
+            imTarget: imTargetKey ?? precheck.recipients[0] ?? '',
+            imCredentialKey: imTargetKey
+              ? (workspace.imTargets?.[imTargetKey]?.credentialKey ?? '')
+              : '',
           }
         : {}),
     }

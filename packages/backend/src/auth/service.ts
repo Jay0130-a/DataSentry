@@ -47,11 +47,17 @@ export interface AuthServiceOptions {
   /** 同一账号在窗口期内允许多少次失败。 */
   maxFailures?: number
   windowMs?: number
+  /** 失败计数表的容量上限，测试用小值构造攻击路径。 */
+  maxFailureEntries?: number
   now?: () => Date
 }
 
 const DEFAULT_TTL_MS = 12 * 60 * 60 * 1000
 const DEFAULT_MAX_FAILURES = 5
+/** 失败计数表的硬上限：随机用户名攻击不能把进程内存撑爆。 */
+const MAX_FAILURE_ENTRIES = 10_000
+/** 过期会话保留一段时间再删，给登出审计留出回放窗口。 */
+const AUTH_SESSION_RETENTION_MS = 7 * 24 * 60 * 60 * 1000
 const DEFAULT_WINDOW_MS = 5 * 60 * 1000
 
 const SEED_ACCOUNTS = [
@@ -125,6 +131,9 @@ export class AuthService {
   private readonly ttlMs: number
   private readonly maxFailures: number
   private readonly windowMs: number
+  private readonly maxFailureEntries: number
+  /** 上次清理失败表的时间，避免表满时每次请求都全表扫描。 */
+  private lastFailurePruneAt = 0
   private readonly now: () => Date
 
   constructor(
@@ -134,6 +143,7 @@ export class AuthService {
     this.ttlMs = options.ttlMs ?? DEFAULT_TTL_MS
     this.maxFailures = options.maxFailures ?? DEFAULT_MAX_FAILURES
     this.windowMs = options.windowMs ?? DEFAULT_WINDOW_MS
+    this.maxFailureEntries = options.maxFailureEntries ?? MAX_FAILURE_ENTRIES
     this.now = options.now ?? (() => new Date())
   }
 
@@ -506,9 +516,14 @@ export class AuthService {
   }
 
   private sweepExpired(): void {
+    // 过期会话保留 7 天再删：立即删除会让「重放过期 token 的登出」
+    // 找不到会话而跳过审计；7 天后仍能保证表不会无限增长。
+    const cutoff = new Date(
+      this.now().getTime() - AUTH_SESSION_RETENTION_MS,
+    ).toISOString()
     this.database.db
       .delete(schema.authSessions)
-      .where(and(isNull(schema.authSessions.revokedAt), lt(schema.authSessions.expiresAt, this.now().toISOString())))
+      .where(lt(schema.authSessions.expiresAt, cutoff))
       .run()
   }
 
@@ -539,10 +554,34 @@ export class AuthService {
     }
   }
 
+  /** 只清理已过期的条目；**不**按插入顺序淘汰活跃条目。 */
+  private pruneExpiredFailures(nowMs: number): void {
+    for (const [username, entry] of this.failures) {
+      if (nowMs >= entry.resetAt) this.failures.delete(username)
+    }
+    this.lastFailurePruneAt = nowMs
+  }
+
   private recordFailure(username: string): void {
     const nowMs = this.now().getTime()
+
+    /*
+     * 表满时只清理过期条目，绝不淘汰仍在窗口期内的条目。
+     *
+     * 按插入顺序淘汰会让攻击者用大量随机用户名把受害者刚锁定的条目挤掉，
+     * 受害者的 count 归零后，暴力破解限流就被绕过了。宁可不再记录新的
+     * 随机用户名，也不能牺牲已有账号的锁定状态。
+     */
+    if (
+      this.failures.size >= this.maxFailureEntries &&
+      nowMs - this.lastFailurePruneAt >= 1000
+    ) {
+      this.pruneExpiredFailures(nowMs)
+    }
+
     const entry = this.failures.get(username)
     if (!entry || nowMs >= entry.resetAt) {
+      if (this.failures.size >= this.maxFailureEntries) return
       this.failures.set(username, { count: 1, resetAt: nowMs + this.windowMs })
       return
     }

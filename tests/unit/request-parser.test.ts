@@ -56,6 +56,17 @@ describe('从需求文本识别期间', () => {
     expect(parsePeriodFromRequest('出上个月的月报', january).period).toBe('2025-12')
   })
 
+  it('相对表达按 Workspace 时区计算，而不是 UTC', () => {
+    // UTC 还是 10 月 31 日，上海已经是 11 月 1 日凌晨。
+    const now = new Date('2025-11-01T01:00:00+08:00')
+    expect(parsePeriodFromRequest('出本月的月报', now).period).toBe('2025-10')
+    expect(parsePeriodFromRequest('出本月的月报', now, 'Asia/Shanghai').period).toBe('2025-11')
+    expect(parsePeriodFromRequest('出上个月的月报', now, 'Asia/Shanghai').period).toBe('2025-10')
+    expect(
+      resolvePeriod({ request: '出上个月的月报', now, timeZone: 'Asia/Shanghai' }).period,
+    ).toBe('2025-10')
+  })
+
   it('「上上个月」不会被「上个月」同时命中而误判歧义', () => {
     // 「上上个月」里包含「上个月」这三个字，分开匹配会算出两个期间。
     // 用交替正则可以保证只命中更长的那一个。

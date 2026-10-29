@@ -1,5 +1,13 @@
 import { existsSync, readFileSync } from 'node:fs'
-import { credentialEnvVar, dataPaths, ErrorCode, fail, REDACTED, type DataPaths } from '@datasentry/core'
+import {
+  CREDENTIAL_ENV_PREFIX,
+  credentialEnvVar,
+  dataPaths,
+  ErrorCode,
+  fail,
+  REDACTED,
+  type DataPaths,
+} from '@datasentry/core'
 
 /**
  * 凭据管理（PRD FR-01.3 / §8 安全）。
@@ -15,9 +23,9 @@ export class CredentialManager {
   /** 用于文本扫描的凭据值，按长度降序，避免短值先匹配把长值切碎。 */
   private readonly secrets: string[]
 
-  private constructor(values: Map<string, string>) {
+  private constructor(values: Map<string, string>, secrets: readonly string[]) {
     this.values = values
-    this.secrets = [...values.values()].filter((v) => v.length >= 4).sort((a, b) => b.length - a.length)
+    this.secrets = [...new Set(secrets)].sort((a, b) => b.length - a.length)
   }
 
   /**
@@ -25,13 +33,13 @@ export class CredentialManager {
    * 环境变量优先，便于 CI 与容器注入而不落盘。
    */
   static load(paths: DataPaths = dataPaths()): CredentialManager {
-    const values = new Map<string, string>()
+    const fileValues = new Map<string, string>()
 
     if (existsSync(paths.credentials)) {
       try {
         const parsed = JSON.parse(readFileSync(paths.credentials, 'utf8')) as Record<string, unknown>
         for (const [key, value] of Object.entries(parsed)) {
-          if (typeof value === 'string') values.set(key, value)
+          if (typeof value === 'string') fileValues.set(key, value)
         }
       } catch (err) {
         throw new Error(
@@ -40,13 +48,43 @@ export class CredentialManager {
       }
     }
 
+    const values = new Map(fileValues)
+    /** 环境变量来源的值单独记一份：它们的熵通常更高，但短值不适合做全文替换。 */
+    const envSecrets: string[] = []
+
     // 环境变量按 core 的命名约定精确反查，不做有损的字符串还原。
-    for (const key of [...values.keys()]) {
+    for (const key of [...fileValues.keys()]) {
       const fromEnv = process.env[credentialEnvVar(key)]
-      if (fromEnv !== undefined) values.set(key, fromEnv)
+      if (fromEnv !== undefined) {
+        values.set(key, fromEnv)
+        envSecrets.push(fromEnv)
+      }
     }
 
-    return new CredentialManager(values)
+    /*
+     * 只有环境变量、没有进 credentials.json 的凭据也必须纳入清洗表。
+     * 例如 `DATASENTRY_CRED_WECOM_BOARD_ROOM`：它由 `get()` 正常取出并注入，
+     * 但如果只扫描文件里的键，`scrub()` 就永远不知道这个值，错误信息或
+     * 工具返回里出现它时会被原样写进事件轨迹。
+     *
+     * Windows 的环境变量查找不区分大小写，前缀判断也要跟着不区分。
+     */
+    for (const [name, value] of Object.entries(process.env)) {
+      if (value !== undefined && name.toUpperCase().startsWith(CREDENTIAL_ENV_PREFIX)) {
+        envSecrets.push(value)
+      }
+    }
+
+    /*
+     * 文件里的凭据通常是我们自己生成的长串；环境变量可能是 `finance` 这类
+     * 低熵值，全文替换会把报表正文里的普通单词也替换掉。用 8 字符作为
+     * env-only 值的下限：真正的 token/webhook key 远长于它。
+     */
+    const secrets = [
+      ...[...fileValues.values()].filter((value) => value.length >= 4),
+      ...envSecrets.filter((value) => value.length >= 8),
+    ]
+    return new CredentialManager(values, secrets)
   }
 
   has(key: string): boolean {

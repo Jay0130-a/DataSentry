@@ -126,8 +126,6 @@ export class RecoveryService {
 
   /** 只读扫描。不改任何状态，可以被 API、CLI、启动日志共用。 */
   scan(sessionIds?: readonly string[]): RecoveryFinding[] {
-    this.deps.approvals.expireOverdue()
-
     const sessions = sessionIds
       ? sessionIds.map((id) => this.deps.sessions.require(id))
       : this.deps.sessions.list()
@@ -154,6 +152,9 @@ export class RecoveryService {
       }>
     } = {},
   ): Promise<RecoveryResult> {
+    // 过期审批的写入放在 recover，而不是 scan：扫描要能被页面/启动日志
+    // 反复调用而不产生副作用。这里先收敛，后面的分类才看得到真实状态。
+    this.deps.approvals.expireOverdue()
     const findings = this.scan(options.sessionIds)
     const result: RecoveryResult = { findings, applied: [], resumed: [], errors: [] }
 
@@ -323,6 +324,15 @@ export class RecoveryService {
           )
         }
         if (latest.status === ApprovalStatus.PENDING) {
+          // scan 不写库，但预览必须和执行结果一致：已过期的 pending 审批
+          // 在这里就按「会被过期」分类，而不是显示成还在等审批。
+          if (Date.parse(latest.expiresAt) <= Date.now()) {
+            return decideDenial(
+              'apply-denial',
+              `审批 ${latest.id} 已过期（${latest.expiresAt}），需要把后果落到会话状态上`,
+              latest,
+            )
+          }
           return decide(
             'needs-manual-review',
             `状态是 WAITING_APPROVAL，但没有悬挂调用，而审批 ${latest.id} 仍未决——状态与记录不一致`,
@@ -356,6 +366,13 @@ export class RecoveryService {
             `审批 ${approval.id} 已通过，可重放原 ToolCall（此前已完成 ${completedSteps} 步，不会重放）`,
           )
         case ApprovalStatus.PENDING:
+          if (Date.parse(approval.expiresAt) <= Date.now()) {
+            return decideDenial(
+              'apply-denial',
+              `审批 ${approval.id} 已过期（${approval.expiresAt}），需要把后果落到会话状态上`,
+              approval,
+            )
+          }
           return decide(
             'awaiting-approval',
             `审批 ${approval.id} 仍未决，任务继续等待（过期于 ${approval.expiresAt}）`,
