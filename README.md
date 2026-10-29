@@ -1,5 +1,7 @@
 # DataSentry
 
+[![CI](https://github.com/Jay0130-a/DataSentry/actions/workflows/ci.yml/badge.svg)](https://github.com/Jay0130-a/DataSentry/actions/workflows/ci.yml)
+
 企业内部报表 Agent 工作台。用自然语言发起报表任务，由 Agent 在**受控工具、权限审批、可恢复状态、可回归事件轨迹**的边界内完成：
 
 ```text
