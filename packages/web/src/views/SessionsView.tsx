@@ -116,14 +116,11 @@ function NewRequestCard({ onCreated }: { onCreated: () => void }): React.JSX.Ele
       setRequest('')
       onCreated()
 
-      // 创建成功后立刻离开表单：自动执行失败时，详情页会显示 INIT 和「执行」按钮，
-      // 重试是重新执行同一个 Session，而不是再创建一条。
-      navigate(`#/sessions/${session.id}`)
+      // 创建成功后立刻离开表单；自动执行交给详情页，避免它先加载到 INIT 快照。
       if (autoRun) {
-        await api.runSession(session.id).catch(() => {
-          // 失败原因由详情页的状态/操作错误呈现，这里不再弹一个已经离开页面的提示。
-        })
+        sessionStorage.setItem(`datasentry:autorun:${session.id}`, '1')
       }
+      navigate(`#/sessions/${session.id}`)
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
     } finally {

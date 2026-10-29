@@ -95,6 +95,8 @@ export function App(): React.JSX.Element {
     try {
       await api.logout()
     } finally {
+      // /auth/me 的 401 被 api.ts 排除在 unauthorized 事件之外，只 reload 会保留旧 user。
+      me.reset()
       me.reload()
     }
   }

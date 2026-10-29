@@ -9,8 +9,8 @@ import {
   rmSync,
   writeFileSync,
 } from 'node:fs'
-import { basename, dirname, isAbsolute, join, relative, sep } from 'node:path'
-import { ErrorCode, hashValue, newId } from '@datasentry/core'
+import { dirname, isAbsolute, join, relative, sep } from 'node:path'
+import { ErrorCode, hashValue, isSafePathSegment, newId } from '@datasentry/core'
 import { composeReportMail } from '../../email/compose.ts'
 import { sendMail } from '../../email/sender.ts'
 import { composeImSummary } from '../../im/summary.ts'
@@ -157,39 +157,16 @@ export function hasPublishIntent(receiptsFile: string, key: string): boolean {
  * 这些名字在 Linux 上合法、在 Windows 上却指向另一个对象，投递落点会失真。
  */
 function assertSafePathSegment(value: string, label: string): void {
-  if (
-    !value ||
-    value === '.' ||
-    value === '..' ||
-    basename(value) !== value ||
-    value.includes('/') ||
-    value.includes('\\') ||
-    value.includes(':') ||
-    /[\u0000-\u001f]/.test(value) ||
-    value.endsWith('.') ||
-    value.endsWith(' ')
-  ) {
+  if (!isSafePathSegment(value)) {
     throw new ToolExecutionError(
       ErrorCode.SCHEMA_INVALID,
-      `${label} 必须是安全的路径片段（不能包含分隔符、..、冒号或首尾空白）：${JSON.stringify(value)}`,
-    )
-  }
-}
-
-const WINDOWS_RESERVED_NAME = /^(con|prn|aux|nul|com[1-9]|lpt[1-9])(\..*)?$/i
-
-function assertNotReservedDeviceName(value: string, label: string): void {
-  if (WINDOWS_RESERVED_NAME.test(value)) {
-    throw new ToolExecutionError(
-      ErrorCode.SCHEMA_INVALID,
-      `${label} 不能是 Windows 保留设备名：${JSON.stringify(value)}`,
+      `${label} 必须是安全的路径片段（不能包含分隔符、..、冒号、控制字符或保留设备名）：${JSON.stringify(value)}`,
     )
   }
 }
 
 function assertSafeFileName(fileName: string): void {
   assertSafePathSegment(fileName, 'fileName')
-  assertNotReservedDeviceName(fileName, 'fileName')
 }
 
 function assertInside(root: string, target: string, label: string): void {
@@ -271,7 +248,6 @@ export const publishGatewayHandlers: LocalToolHandlerMap = {
 
     const reportId = String(args['reportId'])
     assertSafePathSegment(reportId, 'reportId')
-    assertNotReservedDeviceName(reportId, 'reportId')
     const draftVersion = String(args['draftVersion'])
     const recipients = normalizeRecipients((args['recipients'] as unknown[]).map(String))
     const channel = String(args['channel'])

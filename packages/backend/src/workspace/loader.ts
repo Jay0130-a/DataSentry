@@ -4,6 +4,7 @@ import {
   dataPaths,
   ErrorCode,
   fail,
+  isSafePathSegment,
   workspaceFileSchema,
   type DataPaths,
   type Workspace,
@@ -44,14 +45,7 @@ export function loadWorkspace(ref: string, paths: DataPaths = dataPaths()): Load
 
 /** Workspace 引用只能是 `workspaces/` 下的一级目录名，不能是路径。 */
 function assertSafeWorkspaceRef(ref: string): void {
-  if (
-    !ref ||
-    ref === '.' ||
-    ref === '..' ||
-    ref.includes('/') ||
-    ref.includes('\\') ||
-    ref.includes('\0')
-  ) {
+  if (!isSafePathSegment(ref)) {
     fail(ErrorCode.WORKSPACE_NOT_FOUND, `非法的 Workspace 引用 "${ref}"`, { workspace: ref })
   }
 }

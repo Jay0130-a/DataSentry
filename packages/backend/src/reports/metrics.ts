@@ -102,6 +102,8 @@ export interface MetricsResult {
   metrics: MetricValue[]
   conflicts: Conflict[]
   warnings: string[]
+  /** 指标输入本身有歧义等硬错误；调用方应把它们当作校验失败，而不是告警。 */
+  errors: string[]
 }
 
 interface ResolvedInput {
@@ -132,7 +134,7 @@ function sumByField(raw: unknown, field: string): number | undefined {
 function resolveInput(
   results: readonly ToolResult[],
   rule: MetricInputRule | undefined,
-  warnings: string[],
+  errors: string[],
 ): ResolvedInput | undefined {
   if (!rule) return undefined
 
@@ -144,7 +146,7 @@ function resolveInput(
   if (matches.length > 1) {
     // 同一工具被调用多次（不同期间/事业部）时，指标输入无法确定该用哪一条；
     // 静默取第一条会让报表看起来正常，实际却可能用了另一个期间的数据。
-    warnings.push(
+    errors.push(
       `指标输入 ${rule.tool} 匹配到 ${matches.length} 条结果，无法确定使用哪一条`,
     )
     return undefined
@@ -183,12 +185,13 @@ export function computeMetrics(
   inputs: MetricInputs = DEFAULT_METRIC_INPUTS,
 ): MetricsResult {
   const warnings: string[] = []
-  const revenue = resolveInput(results, inputs.revenue, warnings)
-  const cost = resolveInput(results, inputs.cost, warnings)
-  const budget = resolveInput(results, inputs.budgetRevenue, warnings)
-  const warehouseRevenue = resolveInput(results, inputs.warehouseRevenue, warnings)
-  const orderCount = resolveInput(results, inputs.orderCount, warnings)
-  const adjustment = resolveInput(results, inputs.adjustment, warnings)
+  const errors: string[] = []
+  const revenue = resolveInput(results, inputs.revenue, errors)
+  const cost = resolveInput(results, inputs.cost, errors)
+  const budget = resolveInput(results, inputs.budgetRevenue, errors)
+  const warehouseRevenue = resolveInput(results, inputs.warehouseRevenue, errors)
+  const orderCount = resolveInput(results, inputs.orderCount, errors)
+  const adjustment = resolveInput(results, inputs.adjustment, errors)
 
   const drafts: Draft[] = []
 
@@ -338,7 +341,7 @@ export function computeMetrics(
     completeness: worstCompleteness(draft.inputs.map((r) => r.completeness)),
   }))
 
-  return { metrics, conflicts, warnings }
+  return { metrics, conflicts, warnings, errors }
 }
 
 /** 比率保留 6 位小数，金额取整到分。避免浮点尾巴进报表。 */

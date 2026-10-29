@@ -23,4 +23,10 @@ describe('Workspace 加载边界', () => {
       expect(() => loadWorkspace(ref, dataPaths())).toThrowError(/非法的 Workspace 引用/)
     }
   })
+
+  it('拒绝 Windows 别名写法', () => {
+    for (const ref of ['group-finance:', 'CON', 'name.']) {
+      expect(() => loadWorkspace(ref, dataPaths())).toThrowError(/非法的 Workspace 引用/)
+    }
+  })
 })

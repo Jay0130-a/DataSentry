@@ -607,7 +607,11 @@ async function runCase(testCase: EvalCase): Promise<CaseOutcome> {
 
 async function main(): Promise<void> {
   const args = process.argv.slice(2)
-  const caseFilter = args.includes('--case') ? args[args.indexOf('--case') + 1] : undefined
+  const rawCaseFilter = args.includes('--case')
+    ? args[args.indexOf('--case') + 1]
+    : undefined
+  // `--case ""` 等同于没有过滤：后面的 loadCases、基线更新、提示必须用同一个判断。
+  const caseFilter = rawCaseFilter?.trim() ? rawCaseFilter : undefined
   const asJson = args.includes('--json')
   const verbose = args.includes('--verbose')
   const noReport = args.includes('--no-report')

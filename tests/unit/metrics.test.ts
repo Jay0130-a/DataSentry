@@ -87,10 +87,22 @@ describe('指标规则', () => {
 
   it('同一工具匹配到多条结果时报告歧义，不静默取第一条', () => {
     const duplicate: ToolResult = { ...revenue, resultId: 'res_erp_revenue_2' }
-    const computed = computeMetrics([revenue, duplicate, cost])
+    const results = [revenue, duplicate, cost]
+    const computed = computeMetrics(results)
 
     expect(computed.metrics.find((m) => m.key === METRIC_KEYS.revenue)).toBeUndefined()
-    expect(computed.warnings.join()).toContain('匹配到 2 条结果')
+    expect(computed.errors.join()).toContain('匹配到 2 条结果')
+
+    const outcome = validateReport({
+      results,
+      metrics: computed.metrics,
+      conflicts: [],
+      warnings: computed.warnings,
+      errors: computed.errors,
+      required: [METRIC_KEYS.cost],
+    })
+    expect(outcome.ok).toBe(false)
+    expect(outcome.failures.join()).toContain('匹配到 2 条结果')
   })
 
   it('数仓与 ERP 差异超过阈值时判为口径冲突，并保留双方候选值', () => {

@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { api, PUBLISH_FORMAT_OPTIONS, type Approval, type PublishFormat, type SessionDetail } from '../api.ts'
 import {
   Empty,
@@ -118,16 +118,42 @@ export function SessionDetailView({ sessionId }: { sessionId: string }): React.J
   }
 
   const session: SessionDetail | null = detail.data
+  const autoRunStarted = useRef(false)
+
+  // 「创建并立即执行」由 SessionsView 留下的一次性标记触发：
+  // 先跳到详情页，等会话加载出来再执行，页面才能看到真实的运行后状态。
+  useEffect(() => {
+    if (autoRunStarted.current || session?.state !== 'INIT') return
+    const key = `datasentry:autorun:${sessionId}`
+    if (sessionStorage.getItem(key) !== '1') return
+    sessionStorage.removeItem(key)
+    autoRunStarted.current = true
+    void run('run')
+  }, [session?.state, sessionId])
+
   const imTargets =
     workspaces.data?.find((item) => item.id === session?.workspaceId)?.imTargets ?? []
   const pendingApprovals = (approvals.data ?? []).filter((a) => a.status === 'pending')
   const latestApproval = (approvals.data ?? []).at(-1) ?? null
+  /**
+   * 加载失败时页面仍可能保留上一次的 data（useAsync 不清空），
+   * 此时不能让用户基于「刚刚加载失败」的快照发起发布/确认。
+   */
+  const loadError = Boolean(detail.error || report.error || approvals.error || workspaces.error)
   // 发布确认的执行入口是「确认投递」，不是恢复执行：
   // 恢复会把取数循环重放一遍，报表被再算一次，会话状态也会错位。
   const awaitingPublishConfirm =
     session?.state === 'WAITING_APPROVAL' &&
     latestApproval?.kind === 'publish' &&
     latestApproval.status === 'granted'
+  /**
+   * 发布确认过期/被吊销时，恢复执行会被当成「审批被拒」并把会话推到 BLOCKED；
+   * 正确动作是重新发起发布，所以这里要隐藏恢复按钮。
+   */
+  const publishApprovalStale =
+    session?.state === 'WAITING_APPROVAL' &&
+    latestApproval?.kind === 'publish' &&
+    latestApproval.status !== 'granted'
 
   return (
     <div className="stack">
@@ -151,7 +177,8 @@ export function SessionDetailView({ sessionId }: { sessionId: string }): React.J
             ) : null}
             {session &&
             (session.state === 'WAITING_APPROVAL' || session.state === 'PAUSED') &&
-            !awaitingPublishConfirm ? (
+            !awaitingPublishConfirm &&
+            !publishApprovalStale ? (
               <button
                 type="button"
                 className="btn btn-primary"
@@ -198,6 +225,11 @@ export function SessionDetailView({ sessionId }: { sessionId: string }): React.J
           <div className="callout">
             发布确认已通过。投递的执行入口是下方审批表里的「确认投递」——那一步会重新核对文件字节、
             接收人与草稿版本；「恢复执行」只用于取数审批，不会在这里重放。
+          </div>
+        ) : null}
+        {publishApprovalStale ? (
+          <div className="callout">
+            发布确认已过期或被吊销。请重新选择接收人与格式，发起一次新的发布确认。
           </div>
         ) : null}
 
@@ -360,7 +392,7 @@ export function SessionDetailView({ sessionId }: { sessionId: string }): React.J
               <button
                 type="button"
                 className="btn btn-primary"
-                disabled={publishBusy || report.data.status !== 'draft'}
+                disabled={publishBusy || loadError || report.data.status !== 'draft'}
                 onClick={() => void requestPublish()}
               >
                 {publishBusy ? '处理中…' : '发起发布'}
@@ -396,7 +428,7 @@ export function SessionDetailView({ sessionId }: { sessionId: string }): React.J
                 <ApprovalRow
                   key={approval.id}
                   approval={approval}
-                  busy={publishBusy}
+                  busy={publishBusy || loadError}
                   onConfirm={(id) => void confirmPublish(id)}
                 />
               ))}
