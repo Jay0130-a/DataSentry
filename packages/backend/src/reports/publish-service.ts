@@ -392,6 +392,7 @@ export class PublishService {
       session.id,
       toolCall.id,
       '发布二次确认已通过',
+      { allowPublish: true },
     )
 
     const receipt = executed.result?.data as PublishReceiptShape | undefined

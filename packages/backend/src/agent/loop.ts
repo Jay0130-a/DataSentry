@@ -22,6 +22,7 @@ import type { EventStore } from '../events/event-store.ts'
 import type { GuideTracker } from '../harness/guide-tracker.ts'
 import { evaluatePreToolUse } from '../harness/pretooluse.ts'
 import {
+  isAgentCallableTool,
   READ_SOURCE_GUIDE_TOOL,
   subjectSourceOf,
   type ToolRegistry,
@@ -686,7 +687,7 @@ export class AgentRunner {
         requiredSources: state.skill.requiredSources,
         stopRules: state.skill.stopRules,
       },
-      tools: registry.list().map((tool) => ({
+      tools: registry.list().filter(isAgentCallableTool).map((tool) => ({
         name: tool.name,
         title: tool.title,
         description: tool.description,
@@ -724,6 +725,7 @@ export class AgentRunner {
     call: AgentToolCall,
     record: ToolCall,
     rationale?: string,
+    options: { allowPublish?: boolean } = {},
   ): Promise<CallOutcome> {
     const { registry, events, toolCalls, guides, approvals } = this.deps
     const { session } = state
@@ -795,6 +797,7 @@ export class AgentRunner {
       permissionMode: state.workspace.defaultPermissionMode,
       paramsHash,
       approval,
+      ...(options.allowPublish === true ? { allowPublish: true } : {}),
     })
 
     emit(EventType.PermissionDecided, {
@@ -1075,6 +1078,7 @@ export class AgentRunner {
     sessionId: string,
     toolCallId: string,
     rationale = '执行已获审批的工具调用',
+    options: { allowPublish?: boolean } = {},
   ): Promise<{ result: ToolResult | null; toolCallId: string }> {
     const session = this.deps.sessions.require(sessionId)
     const call = this.deps.toolCalls.require(toolCallId)
@@ -1084,7 +1088,13 @@ export class AgentRunner {
     }
 
     const state = this.buildState(session)
-    const outcome = await this.runCall(state, { name: call.toolName, args: call.args }, call, rationale)
+    const outcome = await this.runCall(
+      state,
+      { name: call.toolName, args: call.args },
+      call,
+      rationale,
+      options,
+    )
 
     switch (outcome.kind) {
       case 'succeeded':

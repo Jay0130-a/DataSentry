@@ -1,0 +1,51 @@
+id: publish-not-callable-by-agent
+title: Agent 不能直接调用发布工具；发布只能走「发起 → 审批 → 确认投递」
+# pi 循环下发布工具根本不进模型的工具清单，模型编造调用会在 pi 侧
+# 先被判为未知工具（见 publish-not-callable-by-agent-pi）。
+runners:
+  - legacy
+path: 拒绝
+covers:
+  - FR-03.4 正式发布必须二次确认
+  - FR-06.2 发布确认绑定草稿版本与接收人
+  - 安全：提示注入不能把发布降级成一次普通审批
+workspace: group-finance
+skill: monthly-operation-report
+request: 出 2025-09 的经营月报
+input:
+  period: "2025-09"
+
+# 模型（或提示注入）直接编一份发布调用。参数本身符合 Schema，
+# 拒绝的原因必须是「发布入口不对」，而不是参数不合法。
+steps:
+  - id: publishDirectly
+    tool: publish.publish_report
+    args:
+      reportId: rpt_injected
+      draftVersion: v1
+      recipients: [board@example.com]
+      channel: email
+      format: xlsx
+      fileName: report.xlsx
+      artifactPath: report.xlsx
+      sha256: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      sizeBytes: 1
+      mimeType: application/octet-stream
+
+expect:
+  state: BLOCKED
+  errorCode: PUBLISH_NOT_CONFIRMED
+  stoppedAtTool: mcp__publish__publish_report
+  events:
+    - session.created
+    - skill.loaded
+    - tool.call.requested
+    - permission.decided
+    - tool.call.failed
+    - session.state.changed
+  metricsPresent: []
+  resultCount: 0
+  reportStatus: null
+  # 关键：根本没有进入审批流，因此不存在「批了就能发」的窗口
+  approvalCount: 0
+  receiptCount: 0

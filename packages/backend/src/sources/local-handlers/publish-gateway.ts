@@ -1,13 +1,15 @@
+import { createHash } from 'node:crypto'
 import {
   appendFileSync,
   copyFileSync,
   existsSync,
   mkdirSync,
   readFileSync,
+  realpathSync,
   rmSync,
   writeFileSync,
 } from 'node:fs'
-import { dirname, join } from 'node:path'
+import { basename, dirname, isAbsolute, join, relative } from 'node:path'
 import { ErrorCode, hashValue, newId } from '@datasentry/core'
 import { composeReportMail } from '../../email/compose.ts'
 import { sendMail } from '../../email/sender.ts'
@@ -117,6 +119,74 @@ export function hasPublishIntent(receiptsFile: string, key: string): boolean {
   return existsSync(join(dirname(receiptsFile), 'intents', `${key}.json`))
 }
 
+/** 文件名只能是纯文件名——`../x`、`a/b` 这类值会把投递仓库的落点带出目录。 */
+function assertSafeFileName(fileName: string): void {
+  if (
+    !fileName ||
+    fileName === '.' ||
+    fileName === '..' ||
+    basename(fileName) !== fileName ||
+    fileName.includes('/') ||
+    fileName.includes('\\')
+  ) {
+    throw new ToolExecutionError(
+      ErrorCode.SCHEMA_INVALID,
+      `fileName 必须是纯文件名（不能包含路径分隔符或 ..）：${JSON.stringify(fileName)}`,
+    )
+  }
+}
+
+/**
+ * 投递前复核文件本身。
+ *
+ * 审批绑定的是 sha256 承诺的那几个字节，网关是最后一道能证明「发出去的到底是哪份文件」
+ * 的位置：路径必须落在产物目录内，摘要与大小必须由当前文件现算。上游 `confirmPublish`
+ * 也做同样的检查，但网关是独立进程内 handler，不能假设调用方一定走过那条路径。
+ */
+function verifyArtifact(input: {
+  artifactPath: string
+  artifactsRoot: string
+  sha256: string
+  sizeBytes: number
+}): string {
+  mkdirSync(input.artifactsRoot, { recursive: true })
+
+  let resolved: string
+  try {
+    resolved = realpathSync(input.artifactPath)
+  } catch {
+    throw new ToolExecutionError(
+      ErrorCode.APPROVAL_PARAMS_DRIFT,
+      `要发布的文件不存在或不可读：${input.artifactPath}`,
+    )
+  }
+
+  const root = realpathSync(input.artifactsRoot)
+  const rel = relative(root, resolved)
+  if (!rel || rel.startsWith('..') || isAbsolute(rel)) {
+    throw new ToolExecutionError(
+      ErrorCode.SCHEMA_INVALID,
+      `artifactPath 必须位于产物目录内：${input.artifactPath}`,
+    )
+  }
+
+  const bytes = readFileSync(resolved)
+  const actualSha = createHash('sha256').update(bytes).digest('hex')
+  if (actualSha !== input.sha256) {
+    throw new ToolExecutionError(
+      ErrorCode.APPROVAL_PARAMS_DRIFT,
+      `待发布文件的内容与审批绑定的摘要不一致（绑定 ${input.sha256.slice(0, 12)}…，实算 ${actualSha.slice(0, 12)}…）`,
+    )
+  }
+  if (bytes.length !== input.sizeBytes) {
+    throw new ToolExecutionError(
+      ErrorCode.APPROVAL_PARAMS_DRIFT,
+      `待发布文件大小与绑定不一致（绑定 ${input.sizeBytes} 字节，实际 ${bytes.length} 字节）`,
+    )
+  }
+  return resolved
+}
+
 /**
  * 模拟报表发布网关。
  *
@@ -141,6 +211,8 @@ export const publishGatewayHandlers: LocalToolHandlerMap = {
     const sha256 = String(args['sha256'])
     const sizeBytes = Number(args['sizeBytes'])
     const mimeType = String(args['mimeType'])
+
+    assertSafeFileName(fileName)
 
     const key = publishDedupeKey({ reportId, draftVersion, recipients, channel, format })
 
@@ -174,6 +246,14 @@ export const publishGatewayHandlers: LocalToolHandlerMap = {
         { key },
       )
     }
+
+    // 走到这里说明不是去重命中：真正投递前先证明「发出去的是审批绑定的那份文件」。
+    const verifiedArtifactPath = verifyArtifact({
+      artifactPath,
+      artifactsRoot: ctx.paths.artifacts,
+      sha256,
+      sizeBytes,
+    })
 
     let transport: PublishReceipt['transport'] = 'simulated'
     let messageId: string | null = null
@@ -218,7 +298,7 @@ export const publishGatewayHandlers: LocalToolHandlerMap = {
               to: recipients,
               subject: composed.subject,
               text: composed.text,
-              attachments: [{ filename: fileName, path: artifactPath, contentType: mimeType }],
+              attachments: [{ filename: fileName, path: verifiedArtifactPath, contentType: mimeType }],
             },
             ctx.paths,
           )
@@ -247,7 +327,7 @@ export const publishGatewayHandlers: LocalToolHandlerMap = {
           const sent = await sendWecomFile({
             baseUrl: wecomBaseUrlOf(),
             webhookKey,
-            filePath: artifactPath,
+            filePath: verifiedArtifactPath,
             fileName,
             summaryMarkdown: composeImSummary({
               reportId,
@@ -280,7 +360,7 @@ export const publishGatewayHandlers: LocalToolHandlerMap = {
     const outDir = join(dirname(file), reportId)
     mkdirSync(outDir, { recursive: true })
     const deliveredPath = join(outDir, fileName)
-    copyFileSync(artifactPath, deliveredPath)
+    copyFileSync(verifiedArtifactPath, deliveredPath)
 
     const receipt: PublishReceipt = {
       receiptId: newId('rcpt'),

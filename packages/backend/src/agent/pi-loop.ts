@@ -24,7 +24,7 @@ import { buildSystemPrompt, buildTaskPrompt, formatGuideNote, renderToolResult }
 import type { ToolRegistry } from '../harness/tool-registry.ts'
 import type { RegisteredTool } from '../sources/builder.ts'
 import type { GuideTracker } from '../harness/guide-tracker.ts'
-import { READ_SOURCE_GUIDE_TOOL } from '../harness/tool-registry.ts'
+import { isAgentCallableTool, READ_SOURCE_GUIDE_TOOL } from '../harness/tool-registry.ts'
 import { evaluatePreToolUse } from '../harness/pretooluse.ts'
 import type { ApprovalStore } from '../runtime/approval-store.ts'
 import type { ApprovalGate } from '../runtime/approval-gate.ts'
@@ -468,6 +468,66 @@ export class PiAgentRunner {
       )
     }
 
+    /*
+     * 跨重启恢复必须重跑整条权限链。
+     *
+     * 等待审批期间，审批可能过期，工具名字/版本可能变，Workspace 的 Source
+     * 授权可能被收回。这里只比参数摘要是不够的——legacy 循环正是在
+     * `runCall` 里重跑了一遍 PreToolUse，pi 的恢复不能走一条更宽松的旁路。
+     */
+    const tool = this.deps.registry.get(call.toolName)
+    const verdict = evaluatePreToolUse({
+      toolName: call.toolName,
+      args: call.args,
+      tool,
+      subjectSourceSlug: subjectOf(tool, call.args),
+      workspaceSourceSlugs: state.workspace.sources,
+      activeSourceSlugs: state.activeSourceSlugs,
+      guideRead: (slug) => this.deps.guides.hasRead(sessionId, slug),
+      permissionMode: state.workspace.defaultPermissionMode,
+      // 参数与摘要的一致性已在上方核对过；这里用记录里的摘要做审批绑定比对。
+      paramsHash: call.paramsHash,
+      approval,
+    })
+
+    this.deps.events.emit({
+      sessionId,
+      traceId: session.traceId,
+      type: EventType.PermissionDecided,
+      payload: {
+        toolCallId: call.id,
+        toolName: call.toolName,
+        effect: verdict.effect,
+        code: verdict.code ?? null,
+        reason: verdict.reason,
+        checkedBy: verdict.checkedBy,
+        approvalId: approval.id,
+        resumed: true,
+      },
+    })
+
+    if (verdict.effect !== 'allow') {
+      const code = verdict.code ?? ErrorCode.APPROVAL_INVALID
+      toolCalls.finish(call.id, 'denied', { denyCode: code, denyReason: verdict.reason })
+      this.deps.events.emit({
+        sessionId,
+        traceId: session.traceId,
+        type: EventType.ToolCallFailed,
+        payload: {
+          toolCallId: call.id,
+          toolName: call.toolName,
+          status: 'denied',
+          code,
+          reason: verdict.reason,
+        },
+      })
+      state.session = this.transition(state, SessionState.BLOCKED, {
+        errorCode: code,
+        errorMessage: verdict.reason,
+      })
+      return this.outcome(state, { approvalId: approval.id, resumed: true })
+    }
+
     const transcript = this.deps.transcripts.read(sessionId)
     if (transcript.length === 0) {
       fail(ErrorCode.SESSION_NOT_FOUND, `Session ${sessionId} 缺少对话记录，无法恢复`, {
@@ -491,7 +551,6 @@ export class PiAgentRunner {
       errorMessage: null,
     })
 
-    const tool = this.deps.registry.get(call.toolName)
     if (!tool) {
       fail(ErrorCode.TOOL_NOT_REGISTERED, `工具 "${call.toolName}" 未注册，无法恢复`, {
         toolName: call.toolName,
@@ -743,15 +802,18 @@ export class PiAgentRunner {
   }
 
   private buildTools(state: RunState): AgentTool[] {
-    return this.deps.registry.list().map((tool) => ({
-      name: tool.name,
-      label: tool.title,
-      description: tool.description,
-      // 我们的工具契约本来就是 JSON Schema，运行时与 TypeBox 同构。
-      parameters: tool.paramsSchema as never,
-      execute: async (callId, params) =>
-        this.executeTool(state, callId, params as Record<string, unknown>, tool),
-    }))
+    return this.deps.registry
+      .list()
+      .filter(isAgentCallableTool)
+      .map((tool) => ({
+        name: tool.name,
+        label: tool.title,
+        description: tool.description,
+        // 我们的工具契约本来就是 JSON Schema，运行时与 TypeBox 同构。
+        parameters: tool.paramsSchema as never,
+        execute: async (callId, params) =>
+          this.executeTool(state, callId, params as Record<string, unknown>, tool),
+      }))
   }
 
   private async beforeToolCall(
@@ -1010,13 +1072,17 @@ export class PiAgentRunner {
         requiredSources: state.skill.requiredSources,
         stopRules: state.skill.stopRules,
       },
-      tools: this.deps.registry.list().map((tool) => ({
-        name: tool.name,
-        title: tool.title,
-        description: tool.description,
-        paramsSchema: tool.paramsSchema,
-        guideRead: tool.kind === 'builtin' || this.deps.guides.hasRead(state.session.id, tool.sourceSlug),
-      })),
+      tools: this.deps.registry
+        .list()
+        .filter(isAgentCallableTool)
+        .map((tool) => ({
+          name: tool.name,
+          title: tool.title,
+          description: tool.description,
+          paramsSchema: tool.paramsSchema,
+          guideRead:
+            tool.kind === 'builtin' || this.deps.guides.hasRead(state.session.id, tool.sourceSlug),
+        })),
       activeSourceSlugs: state.activeSourceSlugs,
       history: [],
     }
@@ -1083,6 +1149,8 @@ export class PiAgentRunner {
       reportId?: string | null
       draftVersion?: string | null
       artifactPath?: string | null
+      approvalId?: string | null
+      resumed?: boolean
     },
   ): RunOutcome {
     return {
@@ -1097,8 +1165,8 @@ export class PiAgentRunner {
       artifactPath: patch.artifactPath ?? null,
       stoppedAtIndex: state.denied || state.fatal ? state.step - 1 : null,
       stoppedAtTool: state.denied || state.fatal ? state.lastTool : null,
-      approvalId: null,
-      resumed: false,
+      approvalId: patch.approvalId ?? null,
+      resumed: patch.resumed ?? false,
     }
   }
 }

@@ -346,3 +346,54 @@ describe('PreToolUse · 审批有效性（M2）', () => {
     expect(verdict).toMatchObject({ effect: 'deny', code: ErrorCode.APPROVAL_INVALID })
   })
 })
+
+describe('发布只能由确认入口执行', () => {
+  const publishTool = tool({
+    name: 'mcp__publish__publish_report',
+    sourceSlug: 'publish',
+    toolName: 'publish_report',
+    title: '发布报表',
+    description: '发布报表',
+    paramsSchema: {
+      type: 'object',
+      properties: { reportId: { type: 'string', minLength: 1 } },
+      required: ['reportId'],
+      additionalProperties: false,
+    },
+    sensitivity: Sensitivity.INTERNAL,
+    sideEffect: SideEffect.PUBLISH,
+    requiresGuide: false,
+    toolVersion: 'v1',
+  })
+  const args = { reportId: 'rpt_test' }
+
+  function publishContext(overrides: Partial<PreToolUseContext> = {}): PreToolUseContext {
+    return ctx({
+      tool: publishTool,
+      args,
+      toolName: publishTool.name,
+      workspaceSourceSlugs: ['publish'],
+      activeSourceSlugs: ['publish'],
+      approval: approval({
+        toolName: publishTool.name,
+        paramsHash: hashValue(args),
+        kind: 'publish',
+      }),
+      ...overrides,
+    })
+  }
+
+  it('即使挂着已批准的调用，Agent 直调发布也会被拒', () => {
+    const verdict = evaluatePreToolUse(publishContext())
+    expect(verdict).toMatchObject({
+      effect: 'deny',
+      code: ErrorCode.PUBLISH_NOT_CONFIRMED,
+      checkedBy: 'publish-requires-confirmation',
+    })
+  })
+
+  it('confirmPublish 的确认入口放行', () => {
+    const verdict = evaluatePreToolUse(publishContext({ allowPublish: true }))
+    expect(verdict).toMatchObject({ effect: 'allow' })
+  })
+})

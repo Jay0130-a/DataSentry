@@ -33,6 +33,17 @@ export function builtinTools(): RegisteredTool[] {
 }
 
 /**
+ * 该工具是否可以对模型暴露。
+ *
+ * 发布工具刻意不进模型的工具清单：它的执行入口是人工确认后的 `confirmPublish`，
+ * 让模型看见它只会把「先发起、再审批、最后确认投递」这条合同降级成一次普通工具调用。
+ * 注册表里仍然保留它——`confirmPublish` 需要按名字找到它来执行。
+ */
+export function isAgentCallableTool(tool: RegisteredTool): boolean {
+  return tool.kind !== 'source' || tool.sideEffect !== 'publish'
+}
+
+/**
  * 计算一次调用真正作用在哪个 Source 上。
  *
  * 读 guide 的工具本身不属于任何 Source，但它的**目标**是一个 Source——

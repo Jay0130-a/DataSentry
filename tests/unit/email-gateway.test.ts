@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest'
-import { existsSync, mkdirSync, readdirSync, writeFileSync } from 'node:fs'
+import { createHash } from 'node:crypto'
+import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { ErrorCode } from '@datasentry/core'
 import { composeReportMail } from '@datasentry/backend/email/compose.ts'
@@ -44,6 +45,7 @@ function setup(): {
 }
 
 function argsFor(artifactPath: string, overrides: Record<string, unknown> = {}) {
+  const bytes = readFileSync(artifactPath)
   return {
     reportId: 'rpt_test',
     draftVersion: 'v1-abc',
@@ -52,8 +54,8 @@ function argsFor(artifactPath: string, overrides: Record<string, unknown> = {}) 
     format: 'md',
     fileName: 'report.md',
     artifactPath,
-    sha256: 'a'.repeat(64),
-    sizeBytes: 14,
+    sha256: createHash('sha256').update(bytes).digest('hex'),
+    sizeBytes: bytes.length,
     mimeType: 'text/markdown',
     period: '2025-09',
     workspaceName: '集团财务共享中心',

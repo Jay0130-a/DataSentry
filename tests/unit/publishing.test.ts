@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { createHash } from 'node:crypto'
-import { readFileSync, writeFileSync } from 'node:fs'
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { ErrorCode, isDataSentryError, type Report } from '@datasentry/core'
 import { createAppContext, type AppContext } from '@datasentry/backend/context.ts'
@@ -242,7 +242,8 @@ describe('发布网关幂等', () => {
     sizeBytes: number
     mimeType: string
   } {
-    const artifactPath = join(temp.paths.data, `${name}.xlsx`)
+    mkdirSync(temp.paths.artifacts, { recursive: true })
+    const artifactPath = join(temp.paths.artifacts, `${name}.xlsx`)
     writeFileSync(artifactPath, `fake-xlsx-${name}`, 'utf8')
     const bytes = readFileSync(artifactPath)
     return {
@@ -452,5 +453,44 @@ describe('IM 接收人校验', () => {
 
     expect(outcome.ok).toBe(false)
     expect(outcome.failures.join()).toContain('未配置 IM 目标')
+  })
+})
+
+describe('Agent 不能直接发布', () => {
+  it('计划里直接调用发布工具会被拒绝，既不会生成审批也不会投递', async () => {
+    const session = ctx.createSession({
+      workspace: 'group-finance',
+      request: '出 2025-09 的经营月报',
+      input: { period: '2025-09' },
+    })
+
+    const outcome = await ctx.runSession(session.id, {
+      plan: {
+        steps: [
+          {
+            id: 'publishDirectly',
+            tool: 'publish.publish_report',
+            args: {
+              reportId: 'rpt_injected',
+              draftVersion: 'v1',
+              recipients: ['board@example.com'],
+              channel: 'email',
+              format: 'xlsx',
+              fileName: 'report.xlsx',
+              artifactPath: 'report.xlsx',
+              sha256: 'a'.repeat(64),
+              sizeBytes: 1,
+              mimeType: 'application/octet-stream',
+            },
+          },
+        ],
+      },
+    })
+
+    expect(outcome.state).toBe('BLOCKED')
+    expect(outcome.errorCode).toBe(ErrorCode.PUBLISH_NOT_CONFIRMED)
+    expect(outcome.results).toHaveLength(0)
+    // 关键：不是「先挂起等审批」，而是根本没有进入审批流程
+    expect(ctx.approvals.listBySession(session.id)).toHaveLength(0)
   })
 })
