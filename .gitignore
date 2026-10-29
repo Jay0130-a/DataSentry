@@ -13,8 +13,8 @@ credentials.json
 # 模板要进版本库放上面两条规则之后
 !.env.example
 
-# 回归报告
-reports/
+# 回归报告（只忽略仓库根的这一层，别误伤 packages/*/src/reports）
+/reports/
 *.log
 npm-debug.log*
 
