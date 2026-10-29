@@ -240,4 +240,22 @@ describe('already-published 的恢复收敛', () => {
     // 关键：没有第二条回执
     expect(ctx.publishReceipts(report.id)).toHaveLength(1)
   })
+
+  it('report 已发布但会话是 READY：恢复同样补到 DONE', async () => {
+    const report = await readyReport('2025-06')
+    await publish(report)
+
+    ctx.database.sqlite
+      .prepare('UPDATE session SET state = ? WHERE id = ?')
+      .run(SessionState.READY, report.sessionId)
+
+    const result = await ctx.runRecovery({
+      execute: true,
+      sessionIds: [report.sessionId],
+    })
+
+    expect(result.errors).toEqual([])
+    expect(result.findings[0]?.action).toBe('resolve-publish')
+    expect(ctx.sessions.require(report.sessionId).state).toBe(SessionState.DONE)
+  })
 })

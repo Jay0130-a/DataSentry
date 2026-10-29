@@ -237,10 +237,6 @@ export class PublishService {
       })
     }
 
-    // 新请求取代旧确认：审批和它挂着的调用一起收敛。
-    const supersededCalls = this.supersedePendingPublishCalls(session, toolCalls, approvals)
-    const revoked = approvals.revokePending(session.id, 'publish')
-
     /*
      * 先把文件渲染出来，再生成确认。
      *
@@ -289,6 +285,15 @@ export class PublishService {
         toolName,
       })
     }
+
+    /*
+     * 新请求取代旧确认：审批和它挂着的调用一起收敛。
+     *
+     * 必须放在渲染与工具版本检查**之后**：替换请求本身失败（渲染报错、
+     * 工具未注册）时，旧的确认应当原样保留，而不是先被拆掉再报错。
+     */
+    const supersededCalls = this.supersedePendingPublishCalls(session, toolCalls, approvals)
+    const revoked = approvals.revokePending(session.id, 'publish')
 
     const toolCall = toolCalls.create({
       sessionId: session.id,
@@ -360,6 +365,7 @@ export class PublishService {
     // 这条要排在审批状态检查之前——首次发布后审批可能已过期/被吊销，
     // 重复确认仍应返回「已发布」，而不是一个看起来像失败的错误。
     if (report.status === 'published') {
+      this.convergePublishedSession(session)
       return {
         status: 'already-published',
         receiptId: report.receiptId ?? '',
@@ -604,6 +610,28 @@ export class PublishService {
       this.transition(current, SessionState.DONE)
     }
     return published
+  }
+
+  /**
+   * 报表已发布但会话还停在 WAITING_APPROVAL/READY（崩溃窗口的残留）时补到 DONE。
+   *
+   * 重复确认不应该因为「上次已经发过了」就留下一个永远等审批的会话。
+   */
+  private convergePublishedSession(session: Session): void {
+    const current = this.deps.sessions.require(session.id)
+    if (current.state === SessionState.DONE) return
+    if (
+      current.state !== SessionState.WAITING_APPROVAL &&
+      current.state !== SessionState.READY
+    ) {
+      return
+    }
+    this.deps.sessions.transition(current.id, current.stateVersion, SessionState.DONE)
+    this.emit(current, EventType.StateChanged, {
+      from: current.state,
+      to: SessionState.DONE,
+      reason: 'publish:already-published',
+    })
   }
 
   private transition(session: Session, to: Session['state']): Session {

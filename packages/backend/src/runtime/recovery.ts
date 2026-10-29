@@ -12,6 +12,7 @@ import type { ApprovalStore } from './approval-store.ts'
 import type { CheckpointStore } from './checkpoint.ts'
 import type { SessionStore } from './session-store.ts'
 import type { ToolCallStore } from './tool-call-store.ts'
+import type { ReportStore } from './report-store.ts'
 
 /** `reconcilePublish` 的结论；与 PublishService 的 ReconcileResult 同构。 */
 export type ReconcileOutcome =
@@ -26,8 +27,8 @@ export type RecoveryAction =
   | 'skip-terminal'
   /** BLOCKED / MANUAL_REVIEW / READY —— 等人工或已就绪，不动。 */
   | 'skip-idle'
-  /** 显式暂停，等人工触发继续。 */
-  | 'skip-paused'
+  /** 显式暂停；`recover --execute` 会从检查点继续。 */
+  | 'resume-paused'
   /** 仍在等审批，不动。 */
   | 'awaiting-approval'
   /** 审批已通过：可以重放原 ToolCall。 */
@@ -113,6 +114,7 @@ export class RecoveryService {
       toolCalls: ToolCallStore
       approvals: ApprovalStore
       checkpoints: CheckpointStore
+      reports: ReportStore
       events: EventStore
       /**
        * 查回执并补齐发布记账。由 context 注入（它持有 PublishService）。
@@ -170,6 +172,7 @@ export class RecoveryService {
           options.execute === true &&
           options.resume !== undefined &&
           (finding.action === 'resume-approved' ||
+            finding.action === 'resume-paused' ||
             finding.action === 'mark-interrupted' ||
             finding.action === 'continue-from-checkpoint')
 
@@ -268,11 +271,28 @@ export class RecoveryService {
     if (isTerminal(session.state)) {
       return decide('skip-terminal', `状态 ${session.state} 已终结，无需处理`)
     }
+    // 恢复和 resume 都要求恰好一条悬挂调用；多条只可能来自历史脏数据，
+    // 猜哪一条都会重放错的调用，交给人工比自动选一条安全。
+    if (pending.length > 1) {
+      return decide(
+        'needs-manual-review',
+        `存在 ${pending.length} 条悬挂工具调用，无法确定该重放哪一条`,
+      )
+    }
+    if (session.state === SessionState.READY) {
+      const report = this.deps.reports.bySession(session.id)
+      if (report?.status === 'published') {
+        return decide(
+          'resolve-publish',
+          '报表已发布，但会话仍是 READY——查回执后把状态补齐到 DONE',
+        )
+      }
+    }
     if (IDLE_STATES.includes(session.state)) {
       return decide('skip-idle', `状态 ${session.state} 处于稳定态，等人工推进`)
     }
     if (session.state === SessionState.PAUSED) {
-      return decide('skip-paused', '显式暂停，等待人工触发恢复')
+      return decide('resume-paused', '显式暂停；recover --execute 将从检查点继续')
     }
 
     if (session.state === SessionState.WAITING_APPROVAL) {
@@ -372,7 +392,7 @@ export class RecoveryService {
     switch (finding.action) {
       case 'skip-terminal':
       case 'skip-idle':
-      case 'skip-paused':
+      case 'resume-paused':
       case 'awaiting-approval':
       case 'awaiting-publish-confirmation':
       case 'resume-approved':
@@ -416,6 +436,15 @@ export class RecoveryService {
                 to: SessionState.DONE,
                 reason: 'recovery:already-published',
                 detail: `报表已发布（回执 ${outcome.receiptId}），补齐会话状态`,
+              },
+            })
+            events.emit({
+              sessionId: current.id,
+              traceId: current.traceId,
+              type: EventType.PublishReconciled,
+              payload: {
+                receiptId: outcome.receiptId,
+                reason: '进程在投递记账与状态转移之间中断；报表已发布，补齐会话状态',
               },
             })
             return `报表已发布（回执 ${outcome.receiptId}），已补齐会话状态到 DONE`

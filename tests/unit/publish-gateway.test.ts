@@ -161,13 +161,22 @@ describe('intent 只在能证明未发出时撤销', () => {
     for (const code of ['ECONNREFUSED', 'ENOTFOUND', 'EAI_AGAIN', 'EAUTH', 'EENVELOPE']) {
       expect(isDefinitelyNotDelivered(withCode(code), 'email')).toBe(true)
     }
-    // nodemailer 把连接拒绝包成 ESOCKET，但保留 CONN 命令
+    // nodemailer 把连接拒绝包成 ESOCKET，真错误在 message 里
     expect(
-      isDefinitelyNotDelivered(Object.assign(new Error('x'), { code: 'ESOCKET', command: 'CONN' }), 'email'),
+      isDefinitelyNotDelivered(
+        Object.assign(new Error('connect ECONNREFUSED 127.0.0.1:1'), {
+          code: 'ESOCKET',
+          command: 'CONN',
+        }),
+        'email',
+      ),
     ).toBe(true)
-    // DATA 之后失败：正文可能已经发出去了
+    // 只有 CONN 标记、没有连接拒绝证据：可能是 DATA 之后的 socket 中断
     expect(
-      isDefinitelyNotDelivered(Object.assign(new Error('x'), { code: 'ESOCKET', command: 'DATA' }), 'email'),
+      isDefinitelyNotDelivered(
+        Object.assign(new Error('socket hang up'), { code: 'ESOCKET', command: 'CONN' }),
+        'email',
+      ),
     ).toBe(false)
   })
 
@@ -178,9 +187,13 @@ describe('intent 只在能证明未发出时撤销', () => {
     expect(isDefinitelyNotDelivered(new Error('boom'), 'email')).toBe(false)
   })
 
-  it('企微平台 errcode 视为未发出，网络错误视为未知', () => {
+  it('企微平台 errcode 视为未发出，网络错误/系统繁忙视为未知', () => {
+    expect(isDefinitelyNotDelivered(new WecomError('summary', -1, 'bad gateway'), 'im')).toBe(true)
     expect(isDefinitelyNotDelivered(new WecomError('upload', 40001, 'bad key'), 'im')).toBe(true)
+    // -1：非 JSON / 系统繁忙，无法确定文件是否发出
+    expect(isDefinitelyNotDelivered(new WecomError('send', -1, 'bad gateway'), 'im')).toBe(false)
     expect(isDefinitelyNotDelivered(new Error('network down'), 'im')).toBe(false)
+    expect(isDefinitelyNotDelivered(withCode('ECONNREFUSED'), 'im')).toBe(true)
   })
 
   it('ToolExecutionError 是明确的前置失败', () => {

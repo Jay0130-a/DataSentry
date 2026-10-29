@@ -60,23 +60,25 @@ export interface PublishReceipt {
  */
 export function isDefinitelyNotDelivered(err: unknown, channel: string): boolean {
   if (err instanceof ToolExecutionError) return true
-  if (channel === 'im') return err instanceof WecomError
-
-  // nodemailer 把连接阶段的 ECONNREFUSED 包成 ESOCKET，但会保留 SMTP 命令。
-  // DATA 之前的命令失败时，正文还没有发出去；DATA 及之后一律按结果未知处理。
-  const command = (err as { command?: unknown }).command
-  if (
-    typeof command === 'string' &&
-    ['CONN', 'EHLO', 'STARTTLS', 'AUTH', 'MAIL', 'RCPT'].includes(command)
-  ) {
-    return true
-  }
 
   const code = (err as { code?: unknown }).code
-  return (
-    typeof code === 'string' &&
-    ['ECONNREFUSED', 'ENOTFOUND', 'EAI_AGAIN', 'EAUTH', 'EENVELOPE'].includes(code)
-  )
+  const message = err instanceof Error ? err.message : ''
+  // nodemailer 会把连接阶段的 ECONNREFUSED 包成 ESOCKET，真正的错误码在 message 里。
+  const refused =
+    code === 'ECONNREFUSED' ||
+    code === 'ENOTFOUND' ||
+    code === 'EAI_AGAIN' ||
+    /ECONNREFUSED|ENOTFOUND|EAI_AGAIN/.test(message)
+
+  if (channel === 'im') {
+    if (!(err instanceof WecomError)) return refused
+    // summary 阶段还没发文件；upload/send 只有平台给出明确 errcode 才算未发出。
+    // errcode -1 是「非 JSON / 系统繁忙」这类无法确定的响应，必须按结果未知处理。
+    return err.step === 'summary' || err.errcode > 0
+  }
+
+  if (refused) return true
+  return code === 'EAUTH' || code === 'EENVELOPE'
 }
 
 /** 读取全部回执。M4 的「结果未知时先查回执」走这条路。 */
@@ -333,20 +335,32 @@ export const publishGatewayHandlers: LocalToolHandlerMap = {
 
     if (isRealChannel) {
       // 先落意图再发：进程在发送途中死掉时，这条记录就是「结果未知」的证据。
+      // `wx` 让「检查 + 创建」变成原子操作：两个进程同时确认时只有一个能开始投递。
       mkdirSync(intentDir, { recursive: true })
-      writeFileSync(
-        intentPath,
-        JSON.stringify({
-          key,
-          at: new Date().toISOString(),
-          reportId,
-          draftVersion,
-          recipients,
-          channel,
-          format,
-        }),
-        'utf8',
-      )
+      try {
+        writeFileSync(
+          intentPath,
+          JSON.stringify({
+            key,
+            at: new Date().toISOString(),
+            reportId,
+            draftVersion,
+            recipients,
+            channel,
+            format,
+          }),
+          { encoding: 'utf8', flag: 'wx' },
+        )
+      } catch (err) {
+        if ((err as NodeJS.ErrnoException).code === 'EEXIST') {
+          throw new ToolExecutionError(
+            ErrorCode.RECEIPT_UNKNOWN,
+            `另一个投递进程已经开始了同一份报表的投递（${key.slice(0, 12)}…），无法确定是否已发出；请人工核对`,
+            { key },
+          )
+        }
+        throw err
+      }
 
       try {
         if (channel === 'email') {

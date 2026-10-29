@@ -101,6 +101,13 @@ interface RunState {
   fatal: { code: string; message: string } | null
   /** 本次执行中尚未结算的工具调用，按 pi 的 toolCallId 索引。 */
   pending: Map<string, { id: string; step: number }>
+  /**
+   * 已通过 beforeToolCall、尚未执行完的调用数。
+   *
+   * `state.step` 只在调用结束后递增；pi 会把一条 assistant 消息里的多个调用
+   * 先全部过一遍 beforeToolCall 再并行执行，只数 step 会让一批调用一起越过上限。
+   */
+  inFlight: number
   mock: MockStream | null
   agent: Agent | null
   /** 最近一次发起（或被拒）的工具名，用于在结果里报告停在哪。 */
@@ -139,9 +146,9 @@ export class PiAgentRunner {
       )
     }
 
-    // 全新一轮：清掉可能残留的对话记录，避免把上一轮的消息带进来。
-    this.deps.transcripts.remove(sessionId)
-
+    // 全新一轮：等状态转移校验通过后再清对话记录。
+    // 先删再转的话，READY / MANUAL_REVIEW 这类非法入口会先把唯一的恢复锚点删掉，
+    // 然后才在 transition 里抛错——什么都没跑，却永久丢了 transcript。
     const state: RunState = {
       session: existing,
       workspace: this.deps.loadWorkspace(existing.workspaceId),
@@ -157,6 +164,7 @@ export class PiAgentRunner {
       agent: null,
       lastTool: null,
       rejectedBeforeHook: new Map(),
+      inFlight: 0,
     }
 
     state.activeSourceSlugs = state.skill.requiredSources.filter((slug) =>
@@ -165,6 +173,7 @@ export class PiAgentRunner {
 
     // —— INIT → PLANNING ——
     state.session = this.transition(state, SessionState.PLANNING)
+    this.deps.transcripts.remove(sessionId)
     this.deps.events.emit({
       sessionId: state.session.id,
       traceId: state.session.traceId,
@@ -264,7 +273,7 @@ export class PiAgentRunner {
       return this.outcome(state, {})
     }
 
-    if (state.step >= this.maxSteps) {
+    if (state.step > this.maxSteps) {
       state.session = this.transition(state, SessionState.FAILED, {
         errorCode: ErrorCode.TOOL_EXECUTION_FAILED,
         errorMessage: `超过单任务步骤上限 ${this.maxSteps}，疑似规划器打转`,
@@ -552,6 +561,9 @@ export class PiAgentRunner {
 
     // mock 模式下，脚本进度必须与已完成步骤对齐，否则会重放已完成的步骤。
     this.restoreMock(state, sessionId)
+    // 真实模型没有 mock 脚本，但指标计算同样需要跨重启读回**全部**已完成结果。
+    // 只把这次重放的调用放进 state.results，会让报表在部分数据上计算。
+    if (!this.deps.mockScript) this.restoreResults(state, sessionId)
 
     state.session = this.transition(state, SessionState.FETCHING, {
       errorCode: null,
@@ -663,6 +675,7 @@ export class PiAgentRunner {
       agent: null,
       lastTool: null,
       rejectedBeforeHook: new Map(),
+      inFlight: 0,
     }
   }
 
@@ -672,6 +685,17 @@ export class PiAgentRunner {
    * 脚本是按步骤下标的，重启后必须把已完成步骤「跳过去」，否则会重放。
    * 结果也从磁盘读回来——模板插值需要它们。
    */
+  /** 从落盘结果重建 `state.results`（真实模型恢复用）。 */
+  private restoreResults(state: RunState, sessionId: string): void {
+    const results: ToolResult[] = []
+    for (const call of this.deps.toolCalls.listBySession(sessionId)) {
+      if (call.status !== 'succeeded' || !call.resultRef) continue
+      const result = readToolResult(sessionId, call.resultRef, this.deps.paths)
+      if (result) results.push(result)
+    }
+    state.results = results
+  }
+
   private restoreMock(state: RunState, sessionId: string): void {
     const template = this.deps.mockScript
     if (!template) return
@@ -893,7 +917,7 @@ export class PiAgentRunner {
      * 只在 agent.prompt()/continue() 返回后检查，对真实模型没有约束力：
      * 模型可以一直调工具、循环一直不返回，会话就永远到不了那行检查。
      */
-    if (state.step >= this.maxSteps) {
+    if (state.step + state.inFlight >= this.maxSteps) {
       const message = `超过单任务步骤上限 ${this.maxSteps}，疑似规划器打转`
       toolCalls.finish(record.id, 'failed', {
         denyCode: ErrorCode.TOOL_EXECUTION_FAILED,
@@ -1026,9 +1050,11 @@ export class PiAgentRunner {
         errorCode: null,
         errorMessage: null,
       })
+      state.inFlight += 1
       return undefined
     }
 
+    state.inFlight += 1
     return undefined
   }
 
@@ -1139,6 +1165,8 @@ export class PiAgentRunner {
         details: null,
         isError: true,
       }
+    } finally {
+      state.inFlight = Math.max(0, state.inFlight - 1)
     }
   }
 
@@ -1273,6 +1301,7 @@ function entityState(session: Session): RunState {
     agent: null,
     lastTool: null,
     rejectedBeforeHook: new Map(),
+    inFlight: 0,
   }
 }
 

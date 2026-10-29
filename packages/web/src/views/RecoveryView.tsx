@@ -6,7 +6,7 @@ import { navigate, useAsync } from '../hooks.ts'
 const ACTION_LABELS: Record<string, string> = {
   'skip-terminal': '已终结，不动',
   'skip-idle': '稳定态，等人工',
-  'skip-paused': '已暂停，等人工触发',
+  'resume-paused': '已暂停，将从检查点继续',
   'awaiting-approval': '仍在等审批',
   'resume-approved': '可直接重放原 ToolCall',
   'awaiting-publish-confirmation': '等人工确认投递',

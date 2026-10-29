@@ -464,6 +464,7 @@ export async function createAppContext(options: AppContextOptions = {}): Promise
     toolCalls,
     approvals,
     checkpoints,
+    reports,
     events,
     reconcilePublish: async (sessionId) => {
       const result = await publishing.reconcilePublish(sessionId)
@@ -662,15 +663,20 @@ export async function createAppContext(options: AppContextOptions = {}): Promise
         // 恢复执行走的是与手工恢复相同的路径：重放原 ToolCall、不重新规划。
         // WAITING_APPROVAL 用 pi 自己的恢复（读 transcript、不重新规划）；
         // PAUSED 交给 legacy 的检查点恢复——pi 循环目前没有等价的 PAUSED 恢复。
+        // 还要确认 transcript 确实是 pi 写的：legacy 创建的会话没有这份记录，
+        // 误交给 pi 会因为「找不到挂起调用」而永远恢复不了。
         resume: async (sessionId) => {
           const session = sessions.require(sessionId)
-          const outcome =
-            agentLoop === 'pi' && session.state === SessionState.WAITING_APPROVAL
-              ? await runWithPiLoop(sessionId, options.plan)
-              : await makeRunner({
-                  sessionId,
-                  ...(options.plan ? { plan: options.plan } : {}),
-                }).run(sessionId)
+          const usePi =
+            agentLoop === 'pi' &&
+            session.state === SessionState.WAITING_APPROVAL &&
+            transcripts.read(sessionId).length > 0
+          const outcome = usePi
+            ? await runWithPiLoop(sessionId, options.plan)
+            : await makeRunner({
+                sessionId,
+                ...(options.plan ? { plan: options.plan } : {}),
+              }).run(sessionId)
           return {
             state: outcome.state,
             errorCode: outcome.errorCode,

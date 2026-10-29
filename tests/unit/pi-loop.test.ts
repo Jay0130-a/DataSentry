@@ -64,4 +64,17 @@ describe('pi 循环的边界', () => {
 
     expect(ctx.sessions.require(session.id).state).toBe(SessionState.PAUSED)
   })
+
+  it('recover --execute 能继续 PAUSED 会话（由 legacy 检查点路径接管）', async () => {
+    const session = newSession()
+    ctx.sessions.transition(session.id, 0, SessionState.PLANNING)
+    ctx.sessions.transition(session.id, 1, SessionState.PAUSED)
+
+    const result = await ctx.runRecovery({ execute: true, sessionIds: [session.id] })
+
+    expect(result.errors).toEqual([])
+    expect(result.findings[0]?.action).toBe('resume-paused')
+    expect(result.resumed).toHaveLength(1)
+    expect(ctx.sessions.require(session.id).state).not.toBe(SessionState.PAUSED)
+  })
 })
