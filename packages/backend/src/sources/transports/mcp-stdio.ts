@@ -46,11 +46,22 @@ export async function createMcpStdioTransport(
     stderr: 'pipe',
   })
 
-  await client.connect(stdio)
+  let listed: Awaited<ReturnType<Client['listTools']>>
+  try {
+    await client.connect(stdio)
 
-  // 对账：服务端实际提供的工具必须覆盖 config 声明的工具，
-  // 否则说明「配置说有这么个工具」和「服务真能调」已经不一致了。
-  const listed = await client.listTools()
+    // 对账：服务端实际提供的工具必须覆盖 config 声明的工具，
+    // 否则说明「配置说有这么个工具」和「服务真能调」已经不一致了。
+    listed = await client.listTools()
+  } catch (err) {
+    // connect 成功但 listTools 失败时，client/stdio 已经起来了；
+    // 这里不关掉就会留下一个孤儿子进程，builder 的清理也覆盖不到它。
+    await client.close().catch(() => {
+      // 进程可能已经自己退出；关闭失败不应掩盖原始错误。
+    })
+    throw err
+  }
+
   const served = new Set(listed.tools.map((t) => t.name))
   const missing = config.tools.filter((t) => !served.has(t.name)).map((t) => t.name)
 

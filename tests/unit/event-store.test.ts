@@ -17,7 +17,7 @@ afterEach(() => {
 function setup(): EventStore {
   temp = tempPaths('datasentry-events-')
   handle = openDatabase(temp.paths)
-  return new EventStore(handle.db, temp.paths)
+  return new EventStore(handle.db, temp.paths, undefined, handle.sqlite)
 }
 
 function emit(store: EventStore, sessionId = 'sess_test') {
@@ -105,5 +105,20 @@ describe('事件轨迹：库是事实源，JSONL 是导出', () => {
     const lines = readFileSync(store.jsonlPath('sess_test'), 'utf8').trim().split('\n')
     expect(lines).toHaveLength(3)
     expect(lines[0]).not.toContain('stale')
+  })
+})
+
+describe('多进程序号', () => {
+  it('两个 EventStore 共享同一库时序号不重复', () => {
+    temp = tempPaths('datasentry-events-')
+    handle = openDatabase(temp.paths)
+    const a = new EventStore(handle.db, temp.paths, undefined, handle.sqlite)
+    const b = new EventStore(handle.db, temp.paths, undefined, handle.sqlite)
+
+    const first = emit(a)
+    const second = emit(b)
+
+    expect(second.seq).toBe(first.seq + 1)
+    expect(new Set([first.seq, second.seq]).size).toBe(2)
   })
 })

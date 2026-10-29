@@ -1,5 +1,13 @@
 import { existsSync, readFileSync } from 'node:fs'
-import { credentialEnvVar, dataPaths, ErrorCode, fail, REDACTED, type DataPaths } from '@datasentry/core'
+import {
+  CREDENTIAL_ENV_PREFIX,
+  credentialEnvVar,
+  dataPaths,
+  ErrorCode,
+  fail,
+  REDACTED,
+  type DataPaths,
+} from '@datasentry/core'
 
 /**
  * 凭据管理（PRD FR-01.3 / §8 安全）。
@@ -15,9 +23,11 @@ export class CredentialManager {
   /** 用于文本扫描的凭据值，按长度降序，避免短值先匹配把长值切碎。 */
   private readonly secrets: string[]
 
-  private constructor(values: Map<string, string>) {
+  private constructor(values: Map<string, string>, extraSecrets: readonly string[] = []) {
     this.values = values
-    this.secrets = [...values.values()].filter((v) => v.length >= 4).sort((a, b) => b.length - a.length)
+    this.secrets = [...new Set([...values.values(), ...extraSecrets])]
+      .filter((v) => v.length >= 4)
+      .sort((a, b) => b.length - a.length)
   }
 
   /**
@@ -46,7 +56,17 @@ export class CredentialManager {
       if (fromEnv !== undefined) values.set(key, fromEnv)
     }
 
-    return new CredentialManager(values)
+    /*
+     * 只有环境变量、没有进 credentials.json 的凭据也必须纳入清洗表。
+     * 例如 `DATASENTRY_CRED_WECOM_BOARD_ROOM`：它由 `get()` 正常取出并注入，
+     * 但如果只扫描文件里的键，`scrub()` 就永远不知道这个值，错误信息或
+     * 工具返回里出现它时会被原样写进事件轨迹。
+     */
+    const secretsFromEnv = Object.entries(process.env)
+      .filter(([name, value]) => name.startsWith(CREDENTIAL_ENV_PREFIX) && value !== undefined)
+      .map(([, value]) => value as string)
+
+    return new CredentialManager(values, secretsFromEnv)
   }
 
   has(key: string): boolean {

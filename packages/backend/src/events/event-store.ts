@@ -3,6 +3,7 @@ import { existsSync } from 'node:fs'
 import { renameSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { and, desc, eq } from 'drizzle-orm'
+import type Database from 'better-sqlite3'
 import {
   parseEventJsonl,
   serializeEvent,
@@ -42,6 +43,11 @@ export class EventStore {
     private readonly db: Db,
     private readonly paths: DataPaths,
     private readonly credentials?: CredentialManager,
+    /**
+     * 原始 SQLite 句柄。给了就用 `INSERT ... RETURNING seq` 原子生成序号；
+     * 没有时退回进程内缓存（单进程测试场景）。
+     */
+    private readonly sqlite?: Database.Database,
   ) {
     mkdirSync(paths.events, { recursive: true })
   }
@@ -55,34 +61,63 @@ export class EventStore {
   }
 
   emit(input: EmitInput): AgentEvent {
-    const seq = this.nextSeq(input.sessionId)
     // 落库前统一过一遍凭据清洗：审计轨迹不能成为泄漏渠道。
     const payload = this.credentials
       ? this.credentials.scrubValue(input.payload ?? {})
       : (input.payload ?? {})
+    const eventId = newEventId()
+    const at = new Date().toISOString()
+
+    let seq: number
+    if (this.sqlite) {
+      /*
+       * 序号在**同一条 INSERT** 里由 MAX(seq)+1 生成。
+       *
+       * 进程内的 seqCache 在 CLI + API 同时写同一个 session 时会各算各的，
+       * 产生重复序号；SQLite 的写锁保证这条语句串行执行，读到的最大值
+       * 一定是上一条已提交事件。`RETURNING seq` 顺便把分配到的序号取回来。
+       */
+      const row = this.sqlite
+        .prepare(
+          `INSERT INTO event (event_id, session_id, trace_id, seq, event_type, payload, timestamp)
+           VALUES (?, ?, ?, (SELECT COALESCE(MAX(seq), 0) + 1 FROM event WHERE session_id = ?), ?, ?, ?)
+           RETURNING seq`,
+        )
+        .get(
+          eventId,
+          input.sessionId,
+          input.traceId,
+          input.sessionId,
+          input.type,
+          JSON.stringify(payload),
+          at,
+        ) as { seq: number }
+      seq = row.seq
+    } else {
+      seq = this.nextSeq(input.sessionId)
+      this.db
+        .insert(schema.events)
+        .values({
+          eventId,
+          sessionId: input.sessionId,
+          traceId: input.traceId,
+          seq,
+          eventType: input.type,
+          payload,
+          timestamp: at,
+        })
+        .run()
+    }
 
     const event: AgentEvent = {
-      eventId: newEventId(),
+      eventId,
       sessionId: input.sessionId,
       traceId: input.traceId,
       seq,
       type: input.type,
-      at: new Date().toISOString(),
+      at,
       payload,
     }
-
-    this.db
-      .insert(schema.events)
-      .values({
-        eventId: event.eventId,
-        sessionId: event.sessionId,
-        traceId: event.traceId,
-        seq: event.seq,
-        eventType: event.type,
-        payload: event.payload,
-        timestamp: event.at,
-      })
-      .run()
 
     this.appendJsonl(event)
     return event

@@ -52,6 +52,8 @@ export interface AuthServiceOptions {
 
 const DEFAULT_TTL_MS = 12 * 60 * 60 * 1000
 const DEFAULT_MAX_FAILURES = 5
+/** 失败计数表的硬上限：随机用户名攻击不能把进程内存撑爆。 */
+const MAX_FAILURE_ENTRIES = 10_000
 const DEFAULT_WINDOW_MS = 5 * 60 * 1000
 
 const SEED_ACCOUNTS = [
@@ -506,9 +508,10 @@ export class AuthService {
   }
 
   private sweepExpired(): void {
+    // 已吊销的会话只要过期就一起清掉；否则每次登录/登出都会留下一条永久行。
     this.database.db
       .delete(schema.authSessions)
-      .where(and(isNull(schema.authSessions.revokedAt), lt(schema.authSessions.expiresAt, this.now().toISOString())))
+      .where(lt(schema.authSessions.expiresAt, this.now().toISOString()))
       .run()
   }
 
@@ -539,8 +542,21 @@ export class AuthService {
     }
   }
 
+  private pruneFailures(nowMs: number): void {
+    for (const [username, entry] of this.failures) {
+      if (nowMs >= entry.resetAt) this.failures.delete(username)
+    }
+    // 仍然超限说明都是窗口期内的活跃条目：按插入顺序淘汰最旧的。
+    while (this.failures.size >= MAX_FAILURE_ENTRIES) {
+      const oldest = this.failures.keys().next().value
+      if (oldest === undefined) break
+      this.failures.delete(oldest)
+    }
+  }
+
   private recordFailure(username: string): void {
     const nowMs = this.now().getTime()
+    if (this.failures.size >= MAX_FAILURE_ENTRIES) this.pruneFailures(nowMs)
     const entry = this.failures.get(username)
     if (!entry || nowMs >= entry.resetAt) {
       this.failures.set(username, { count: 1, resetAt: nowMs + this.windowMs })

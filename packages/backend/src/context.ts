@@ -188,7 +188,12 @@ export interface AppContext {
 }
 
 export async function createAppContext(options: AppContextOptions = {}): Promise<AppContext> {
+  // `.env` 必须在 `dataPaths()` 之前加载：DATASENTRY_DATA_DIR / DATASENTRY_ROOT
+  // 就写在里面，晚一步读就会落到另一个数据目录。
+  if (!options.paths) loadLocalEnv()
   const paths = options.paths ?? dataPaths()
+  loadLocalEnv(paths)
+
   const maxSteps = options.maxSteps
   const agentLoop: 'legacy' | 'pi' =
     options.agentLoop ?? (process.env['DATASENTRY_AGENT_LOOP'] === 'pi' ? 'pi' : 'legacy')
@@ -196,9 +201,6 @@ export async function createAppContext(options: AppContextOptions = {}): Promise
   const credentials = CredentialManager.load(paths)
   const database = openDatabase(paths)
   const auth = new AuthService(database)
-
-  // 先加载 .env（若有），再做模型配置解析——配置可能要读里面的环境变量。
-  loadLocalEnv(paths)
 
   /*
    * 模型配置在**启动时**解析并校验。
@@ -273,7 +275,7 @@ export async function createAppContext(options: AppContextOptions = {}): Promise
     })
   }
 
-  const events = new EventStore(database.db, paths, credentials)
+  const events = new EventStore(database.db, paths, credentials, database.sqlite)
   const sessions = new SessionStore(database.db)
   const toolCalls = new ToolCallStore(database.db)
   const checkpoints = new CheckpointStore(database.db)
@@ -581,6 +583,7 @@ export async function createAppContext(options: AppContextOptions = {}): Promise
       const resolved = resolvePeriod({
         request: input.request,
         explicitPeriod: input.input['period'],
+        timeZone: workspace.timezone,
       })
       const resolvedInput: Record<string, unknown> = { ...input.input, period: resolved.period }
 

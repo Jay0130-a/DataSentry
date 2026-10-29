@@ -108,7 +108,7 @@ describe('恢复扫描：把残局分类清楚', () => {
     expect(actionOf(session.id)).toBe('resume-approved')
   })
 
-  it('审批在停机期间过期：报 apply-denial', async () => {
+  it('审批在停机期间过期：recover 先标记过期再报 apply-denial', async () => {
     const session = newSession()
     await ctx.runSession(session.id, {
       plan: {
@@ -125,7 +125,9 @@ describe('恢复扫描：把残局分类清楚', () => {
       .prepare('UPDATE approval SET expires_at = ? WHERE id = ?')
       .run(new Date(Date.now() - 60_000).toISOString(), approval.id)
 
-    expect(actionOf(session.id)).toBe('apply-denial')
+    // scan 是只读的，不会替我们把 pending 改成 expired；recover 才会。
+    const result = await ctx.runRecovery({ execute: false, sessionIds: [session.id] })
+    expect(result.findings[0]?.action).toBe('apply-denial')
   })
 })
 
@@ -238,6 +240,41 @@ describe('恢复死局回归', () => {
 
     expect(result.errors).toEqual([])
     expect(ctx.sessions.require(created.id).state).toBe(SessionState.INIT)
+  })
+
+  it('scan 只读：过期审批不会被扫描顺手改掉', async () => {
+    const created = newSession()
+    ctx.sessions.transition(created.id, 0, SessionState.PLANNING)
+    ctx.sessions.transition(created.id, 1, SessionState.FETCHING)
+
+    const args = { period: '2025-09' }
+    const call = ctx.toolCalls.create({
+      sessionId: created.id,
+      step: 0,
+      toolName: 'mcp__erp__fetch_revenue',
+      sourceSlug: 'erp',
+      paramsHash: hashValue(args),
+      toolVersion: 'v-test',
+      args,
+    })
+    const approval = ctx.approvals.create({
+      sessionId: created.id,
+      workspaceId: 'group-finance',
+      toolCallId: call.id,
+      toolName: call.toolName,
+      toolVersion: call.toolVersion,
+      paramsHash: call.paramsHash,
+      kind: 'tool-call',
+    })
+    ctx.database.sqlite
+      .prepare('UPDATE approval SET expires_at = ? WHERE id = ?')
+      .run(new Date(Date.now() - 60_000).toISOString(), approval.id)
+
+    ctx.recovery.scan([created.id])
+    expect(ctx.approvals.require(approval.id).status).toBe(ApprovalStatus.PENDING)
+
+    await ctx.runRecovery({ execute: false, sessionIds: [created.id] })
+    expect(ctx.approvals.require(approval.id).status).toBe(ApprovalStatus.EXPIRED)
   })
 
   it('审批已拒绝且调用已结束时，恢复能按 DENIED 收敛而不是空指针', async () => {

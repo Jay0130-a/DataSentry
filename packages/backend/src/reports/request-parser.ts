@@ -56,13 +56,43 @@ function shiftMonth(year: number, month: number, delta: number): string {
 }
 
 /**
+ * 「现在」是哪一年哪一月，按 Workspace 的时区计算。
+ *
+ * 报表里的「上个月」是业务时区的上个月，不是 UTC 的上个月：
+ * 在 Asia/Shanghai 的月初 0–8 点，UTC 还停在上一个月，
+ * 直接用 getUTCMonth() 会把「本月」算成「上月」。
+ */
+function currentYearMonth(now: Date, timeZone?: string): { year: number; month: number } {
+  const fallback = { year: now.getUTCFullYear(), month: now.getUTCMonth() + 1 }
+  if (!timeZone) return fallback
+
+  try {
+    const parts = new Intl.DateTimeFormat('en-US', {
+      timeZone,
+      year: 'numeric',
+      month: '2-digit',
+    }).formatToParts(now)
+    const year = Number(parts.find((part) => part.type === 'year')?.value)
+    const month = Number(parts.find((part) => part.type === 'month')?.value)
+    return Number.isFinite(year) && Number.isFinite(month) ? { year, month } : fallback
+  } catch {
+    // 配置里写错时区不应该让整个任务无法创建；退回 UTC 并保持可预测。
+    return fallback
+  }
+}
+
+/**
  * 从需求文本里抽期间。
  *
  * 相对表达（本月/上月/下月）依赖服务端时钟——这是它的语义决定的，
  * 报表系统里「出上个月的月报」本来就是个常用说法。为了让测试可控，
  * `now` 可以注入。
  */
-export function parsePeriodFromRequest(text: string, now: Date = new Date()): ParsedPeriod {
+export function parsePeriodFromRequest(
+  text: string,
+  now: Date = new Date(),
+  timeZone?: string,
+): ParsedPeriod {
   const matches: string[] = []
   const periods = new Set<string>()
 
@@ -82,8 +112,7 @@ export function parsePeriodFromRequest(text: string, now: Date = new Date()): Pa
   // 用**一个**交替正则而不是逐个 pattern 跑：`上上个月` 里包含 `上个月`，
   // 分开匹配会同时命中两种表达、算出两个不同的期间，把一个本来明确的句子
   // 判成「歧义」。交替正则按从左到右的顺序尝试，长的写法在前，命中后整体跳过。
-  const relativeYear = now.getUTCFullYear()
-  const relativeMonth = now.getUTCMonth() + 1
+  const { year: relativeYear, month: relativeMonth } = currentYearMonth(now, timeZone)
   const deltaByExpression: Record<string, number> = {
     上上个月: -2,
     上上月: -2,
@@ -126,13 +155,15 @@ export function resolvePeriod(input: {
   request: string
   explicitPeriod?: unknown
   now?: Date
+  /** Workspace 时区；相对期间（本月/上个月）按它计算。 */
+  timeZone?: string
 }): ResolvedPeriod {
   const explicit =
     typeof input.explicitPeriod === 'string' && input.explicitPeriod.trim().length > 0
       ? input.explicitPeriod
       : undefined
 
-  const parsed = parsePeriodFromRequest(input.request, input.now)
+  const parsed = parsePeriodFromRequest(input.request, input.now, input.timeZone)
 
   if (parsed.ambiguous) {
     fail(

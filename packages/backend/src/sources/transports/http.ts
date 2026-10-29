@@ -6,6 +6,20 @@ import { parseExecutionPayload, ToolExecutionError, type SourceTransport } from 
 type HttpConfig = Extract<SourceConfig, { type: 'http' }>
 
 /**
+ * 拼接工具 URL，保留 baseUrl 的路径前缀。
+ *
+ * `new URL('/tools/x', 'https://host/api/v1')` 会把 `/api/v1` 丢掉；
+ * 挂在 `/api/v1` 下的真实企业网关会因此全部 404。
+ */
+export function buildToolUrl(baseUrl: string, toolPath: string, toolName: string): string {
+  const base = new URL(baseUrl)
+  const path = toolPath.replaceAll('{tool}', toolName)
+  const prefix = base.pathname.replace(/\/+$/, '')
+  const suffix = path.replace(/^\/+/, '')
+  return new URL(`${prefix}/${suffix}`, base.origin).toString()
+}
+
+/**
  * HTTP 接入（PRD FR-01.2）。
  *
  * `baseUrl` 指向外部服务时是真实企业系统的接入形态；指向 managed 服务时
@@ -28,8 +42,7 @@ export function createHttpTransport(
   return {
     slug: config.slug,
     async call(toolName, args) {
-      const path = transport.toolPath.replaceAll('{tool}', toolName)
-      const url = new URL(path, baseUrl).toString()
+      const url = buildToolUrl(baseUrl, transport.toolPath, toolName)
 
       let response: Response
       try {

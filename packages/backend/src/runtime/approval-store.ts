@@ -252,7 +252,7 @@ export class ApprovalStore {
       })
     }
 
-    this.db
+    const updated = this.db
       .update(schema.approvals)
       .set({
         status:
@@ -261,8 +261,19 @@ export class ApprovalStore {
         reason: decision.reason ?? null,
         decidedAt: new Date().toISOString(),
       })
-      .where(eq(schema.approvals.id, id))
+      // 条件更新：两个进程同时决定时，只有一个能命中 pending。
+      .where(
+        and(eq(schema.approvals.id, id), eq(schema.approvals.status, ApprovalStatus.PENDING)),
+      )
       .run()
+
+    if (updated.changes === 0) {
+      const latest = this.require(id)
+      fail(ErrorCode.APPROVAL_INVALID, `审批 ${id} 已经是 ${latest.status}，不能重复决定`, {
+        approvalId: id,
+        status: latest.status,
+      })
+    }
 
     return this.require(id)
   }

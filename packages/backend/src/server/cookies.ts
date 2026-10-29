@@ -20,7 +20,12 @@ export function readCookie(header: string | undefined, name: string): string | n
     const index = part.indexOf('=')
     if (index < 0) continue
     if (part.slice(0, index).trim() !== name) continue
-    return decodeURIComponent(part.slice(index + 1).trim())
+    try {
+      return decodeURIComponent(part.slice(index + 1).trim())
+    } catch {
+      // 畸形 Cookie 不应该把未登录请求变成 500；当作没有这个 Cookie。
+      return null
+    }
   }
   return null
 }

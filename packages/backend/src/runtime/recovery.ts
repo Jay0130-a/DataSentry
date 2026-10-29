@@ -126,8 +126,6 @@ export class RecoveryService {
 
   /** 只读扫描。不改任何状态，可以被 API、CLI、启动日志共用。 */
   scan(sessionIds?: readonly string[]): RecoveryFinding[] {
-    this.deps.approvals.expireOverdue()
-
     const sessions = sessionIds
       ? sessionIds.map((id) => this.deps.sessions.require(id))
       : this.deps.sessions.list()
@@ -154,6 +152,9 @@ export class RecoveryService {
       }>
     } = {},
   ): Promise<RecoveryResult> {
+    // 过期审批的写入放在 recover，而不是 scan：扫描要能被页面/启动日志
+    // 反复调用而不产生副作用。这里先收敛，后面的分类才看得到真实状态。
+    this.deps.approvals.expireOverdue()
     const findings = this.scan(options.sessionIds)
     const result: RecoveryResult = { findings, applied: [], resumed: [], errors: [] }
 

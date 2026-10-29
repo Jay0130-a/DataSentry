@@ -69,6 +69,21 @@ export function normalizeRecipients(recipients: readonly string[]): string[] {
 }
 
 /**
+ * 按不区分大小写的方式找到 Workspace 里配置的 IM 目标键。
+ *
+ * 接收人会被 `normalizeRecipients` 转成小写，但 `imTargets` 的键是人工配置的
+ * （可能是 `Board-Room`）。直接用小写名去索引原对象会取到 undefined，
+ * 审批绑到一个空凭据，真正投递时才报 CREDENTIAL_MISSING。
+ */
+export function findImTargetKey(
+  imTargets: Record<string, unknown> | undefined,
+  name: string,
+): string | null {
+  const lower = name.trim().toLowerCase()
+  return Object.keys(imTargets ?? {}).find((key) => key.toLowerCase() === lower) ?? null
+}
+
+/**
  * 发布确认的绑定摘要（PRD FR-03.4 / FR-06.2）。
  *
  * 绑定的是**草稿版本 + 接收人 + 渠道 + 格式**。任何一项变化，摘要就变，

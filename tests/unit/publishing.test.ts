@@ -4,7 +4,11 @@ import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { ApprovalStatus, ErrorCode, isDataSentryError, type Report } from '@datasentry/core'
 import { createAppContext, type AppContext } from '@datasentry/backend/context.ts'
-import { computeRecipientsHash, precheckPublish } from '@datasentry/backend/reports/publishing.ts'
+import {
+  computeRecipientsHash,
+  findImTargetKey,
+  precheckPublish,
+} from '@datasentry/backend/reports/publishing.ts'
 import { seedAll } from '@datasentry/mcp-sources'
 import { tempPaths, type TempPaths } from '../helpers/tmp.ts'
 
@@ -454,6 +458,13 @@ describe('IM 接收人校验', () => {
     expect(outcome.ok).toBe(false)
     expect(outcome.failures.join()).toContain('未配置 IM 目标')
   })
+
+  it('IM 目标键大小写不敏感，凭据按原始键取', () => {
+    expect(
+      findImTargetKey({ 'Board-Room': { credentialKey: 'WECOM_BOARD_ROOM' } }, 'board-room'),
+    ).toBe('Board-Room')
+    expect(findImTargetKey(undefined, 'board-room')).toBeNull()
+  })
 })
 
 describe('Agent 不能直接发布', () => {
@@ -512,6 +523,21 @@ describe('发布请求取代与幂等', () => {
     expect(ctx.approvals.latestPending(report.sessionId)?.id).toBe(second.approval.id)
     // 只留新请求这一条悬挂调用
     expect(ctx.toolCalls.pendingBySession(report.sessionId)).toHaveLength(1)
+  })
+
+  it('同一条审批不能重复决定', async () => {
+    const report = await readyReport('2024-06')
+    const { approval } = await ctx.requestPublish(report.id, {
+      recipients: ['board@example.com'],
+      channel: 'email',
+      format: 'xlsx',
+    })
+    ctx.decideApproval(approval.id, { decision: 'granted', approver: '财务总监' })
+
+    expectCode(
+      () => ctx.decideApproval(approval.id, { decision: 'denied', approver: '财务总监' }),
+      ErrorCode.APPROVAL_INVALID,
+    )
   })
 
   it('重复确认返回 already-published，不重复写投递事件', async () => {
