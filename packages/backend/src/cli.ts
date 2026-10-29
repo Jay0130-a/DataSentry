@@ -315,6 +315,10 @@ program
         process.exitCode = 1
         return
       }
+      if (result.status === 'already-published') {
+        process.stdout.write(`该报表已经发布，回执 ${result.receiptId || '（未记录）'}；未重复投递\n`)
+        return
+      }
       process.stdout.write(
         `已发布：回执 ${result.receipt.receiptId}\n` +
           `  接收人：${result.receipt.recipients.join(', ')}\n` +

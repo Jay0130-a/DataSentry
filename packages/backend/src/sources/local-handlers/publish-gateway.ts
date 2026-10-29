@@ -14,7 +14,7 @@ import { ErrorCode, hashValue, newId } from '@datasentry/core'
 import { composeReportMail } from '../../email/compose.ts'
 import { sendMail } from '../../email/sender.ts'
 import { composeImSummary } from '../../im/summary.ts'
-import { sendWecomFile, wecomBaseUrlOf } from '../../im/wecom.ts'
+import { sendWecomFile, WecomError, wecomBaseUrlOf } from '../../im/wecom.ts'
 import { ToolExecutionError } from '../transports/types.ts'
 import type { LocalToolHandlerMap } from '../transports/local.ts'
 
@@ -49,6 +49,34 @@ export interface PublishReceipt {
   publishedAt: string
   /** 去重键：(reportId, draftVersion, recipients, channel, format) 的稳定摘要。 */
   key: string
+}
+
+/**
+ * 这个错误能否证明「消息没有发出去」。
+ *
+ * 只有明确的前置失败才允许撤掉 intent：连接被拒、DNS 失败、认证失败、
+ * 信封被拒、企微平台返回 errcode。超时、socket 中断、发送后 5xx 都属于
+ * 「可能已经到达对方」——intent 必须保留，下一次以 RECEIPT_UNKNOWN 拦下。
+ */
+export function isDefinitelyNotDelivered(err: unknown, channel: string): boolean {
+  if (err instanceof ToolExecutionError) return true
+  if (channel === 'im') return err instanceof WecomError
+
+  // nodemailer 把连接阶段的 ECONNREFUSED 包成 ESOCKET，但会保留 SMTP 命令。
+  // DATA 之前的命令失败时，正文还没有发出去；DATA 及之后一律按结果未知处理。
+  const command = (err as { command?: unknown }).command
+  if (
+    typeof command === 'string' &&
+    ['CONN', 'EHLO', 'STARTTLS', 'AUTH', 'MAIL', 'RCPT'].includes(command)
+  ) {
+    return true
+  }
+
+  const code = (err as { code?: unknown }).code
+  return (
+    typeof code === 'string' &&
+    ['ECONNREFUSED', 'ENOTFOUND', 'EAI_AGAIN', 'EAUTH', 'EENVELOPE'].includes(code)
+  )
 }
 
 /** 读取全部回执。M4 的「结果未知时先查回执」走这条路。 */
@@ -386,8 +414,11 @@ export const publishGatewayHandlers: LocalToolHandlerMap = {
           imTarget = targetName
         }
       } catch (err) {
-        // 明确失败（对方拒绝、连不上、缺凭据）：撤掉意图，允许重试。
-        rmSync(intentPath, { force: true })
+        // 只有能证明「没发出去」的错误才撤掉意图；否则保留 intent，
+        // 让下一次调用以 RECEIPT_UNKNOWN 停下，而不是悄悄重发。
+        if (isDefinitelyNotDelivered(err, channel)) {
+          rmSync(intentPath, { force: true })
+        }
         if (err instanceof ToolExecutionError) throw err
         throw new ToolExecutionError(
           ErrorCode.TOOL_EXECUTION_FAILED,

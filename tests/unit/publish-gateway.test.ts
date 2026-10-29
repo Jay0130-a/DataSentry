@@ -3,8 +3,9 @@ import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { ErrorCode } from '@datasentry/core'
-import { publishGatewayHandlers } from '@datasentry/backend/sources/local-handlers/publish-gateway.ts'
+import { publishGatewayHandlers, isDefinitelyNotDelivered } from '@datasentry/backend/sources/local-handlers/publish-gateway.ts'
 import { ToolExecutionError } from '@datasentry/backend/sources/transports/types.ts'
+import { WecomError } from '@datasentry/backend/im/wecom.ts'
 import { tempPaths, type TempPaths } from '../helpers/tmp.ts'
 
 /**
@@ -148,5 +149,46 @@ describe('发布网关：投递前复核文件', () => {
       baseArgs({ artifactPath: join(temp.paths.artifacts, 'missing.xlsx') }),
       ErrorCode.APPROVAL_PARAMS_DRIFT,
     )
+  })
+})
+
+describe('intent 只在能证明未发出时撤销', () => {
+  function withCode(code: string): Error {
+    return Object.assign(new Error(code), { code })
+  }
+
+  it('连接拒绝、DNS、认证、信封错误视为明确未发出', () => {
+    for (const code of ['ECONNREFUSED', 'ENOTFOUND', 'EAI_AGAIN', 'EAUTH', 'EENVELOPE']) {
+      expect(isDefinitelyNotDelivered(withCode(code), 'email')).toBe(true)
+    }
+    // nodemailer 把连接拒绝包成 ESOCKET，但保留 CONN 命令
+    expect(
+      isDefinitelyNotDelivered(Object.assign(new Error('x'), { code: 'ESOCKET', command: 'CONN' }), 'email'),
+    ).toBe(true)
+    // DATA 之后失败：正文可能已经发出去了
+    expect(
+      isDefinitelyNotDelivered(Object.assign(new Error('x'), { code: 'ESOCKET', command: 'DATA' }), 'email'),
+    ).toBe(false)
+  })
+
+  it('超时、socket 中断、未知错误视为结果未知', () => {
+    for (const code of ['ETIMEDOUT', 'ESOCKET', 'ECONNECTION', 'EPIPE']) {
+      expect(isDefinitelyNotDelivered(withCode(code), 'email')).toBe(false)
+    }
+    expect(isDefinitelyNotDelivered(new Error('boom'), 'email')).toBe(false)
+  })
+
+  it('企微平台 errcode 视为未发出，网络错误视为未知', () => {
+    expect(isDefinitelyNotDelivered(new WecomError('upload', 40001, 'bad key'), 'im')).toBe(true)
+    expect(isDefinitelyNotDelivered(new Error('network down'), 'im')).toBe(false)
+  })
+
+  it('ToolExecutionError 是明确的前置失败', () => {
+    expect(
+      isDefinitelyNotDelivered(
+        new ToolExecutionError(ErrorCode.CREDENTIAL_MISSING, '缺少凭据'),
+        'email',
+      ),
+    ).toBe(true)
   })
 })

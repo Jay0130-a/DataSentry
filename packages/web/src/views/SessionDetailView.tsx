@@ -80,6 +80,8 @@ export function SessionDetailView({ sessionId }: { sessionId: string }): React.J
             `→ ${result.receipt.recipients.join(', ')}；回执 ${result.receipt.receiptId}` +
             `${result.receipt.deduplicated ? '（去重命中，未重发）' : ''}`,
         )
+      } else if (result.status === 'already-published') {
+        setPublishMsg(`该报表已经发布，回执 ${result.receiptId ?? '（未记录）'}；未重复投递`)
       } else {
         setPublishMsg(result.message ?? '该发布确认尚未获批')
       }

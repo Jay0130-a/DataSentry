@@ -60,6 +60,8 @@ export interface RequestPublishResult {
 export type ConfirmPublishResult =
   | { status: 'pending'; approvalId: string }
   | { status: 'published'; receipt: PublishReceiptShape; report: Report }
+  /** 已经投递并记账过：重复确认直接返回，不重放网关调用。 */
+  | { status: 'already-published'; receiptId: string; report: Report }
 
 /**
  * 「结果未知」的三种判定（PRD FR-06.3）。
@@ -145,6 +147,40 @@ export class PublishService {
   }
 
   /**
+   * 新发布请求取代旧确认时，旧的悬挂调用也要结束。
+   *
+   * 只吊销审批、把 tool_call 留在 pending，会让一个 Session 上堆积多条悬挂调用：
+   * 恢复会取到最旧的那条（已被吊销），重启后的 resume 又会因为
+   * `pending.length !== 1` 直接失败。审批与调用必须一起收敛。
+   */
+  private supersedePendingPublishCalls(
+    session: Session,
+    toolCalls: ToolCallStore,
+    approvals: ApprovalStore,
+  ): number {
+    const pending = approvals
+      .listBySession(session.id)
+      .filter((approval) => approval.kind === 'publish')
+      .map((approval) => toolCalls.get(approval.toolCallId))
+      .filter((call): call is ToolCall => call !== undefined && call.status === 'pending')
+
+    for (const call of pending) {
+      toolCalls.finish(call.id, 'denied', {
+        denyCode: ErrorCode.APPROVAL_INVALID,
+        denyReason: '被新的发布请求取代',
+      })
+      this.emit(session, EventType.ToolCallFailed, {
+        toolCallId: call.id,
+        toolName: call.toolName,
+        status: 'denied',
+        code: ErrorCode.APPROVAL_INVALID,
+        reason: '被新的发布请求取代',
+      })
+    }
+    return pending.length
+  }
+
+  /**
    * 发起发布确认：跑前置校验，把「草稿版本 + 接收人 + 渠道」绑定成一份待确认项。
    *
    * 新的请求会吊销同一 Session 上尚未执行的旧确认——否则改完接收人再确认旧的，
@@ -201,7 +237,8 @@ export class PublishService {
       })
     }
 
-    // 新请求取代旧确认。
+    // 新请求取代旧确认：审批和它挂着的调用一起收敛。
+    const supersededCalls = this.supersedePendingPublishCalls(session, toolCalls, approvals)
     const revoked = approvals.revokePending(session.id, 'publish')
 
     /*
@@ -285,6 +322,7 @@ export class PublishService {
       channel: request.channel,
       recipientsHash,
       superseded: revoked,
+      supersededCalls,
       expiresAt: approval.expiresAt,
       warnings: precheck.warnings,
     })
@@ -313,6 +351,22 @@ export class PublishService {
       fail(ErrorCode.APPROVAL_INVALID, `审批 ${approvalId} 不是发布确认`, { approvalId })
     }
 
+    const session = sessions.require(approval.sessionId)
+    const toolCall = toolCalls.require(approval.toolCallId)
+    const reportId = String(toolCall.args['reportId'])
+    const report = reports.require(reportId)
+
+    // 幂等：已经发布过的报表不再执行网关调用，也不重复写事件。
+    // 这条要排在审批状态检查之前——首次发布后审批可能已过期/被吊销，
+    // 重复确认仍应返回「已发布」，而不是一个看起来像失败的错误。
+    if (report.status === 'published') {
+      return {
+        status: 'already-published',
+        receiptId: report.receiptId ?? '',
+        report,
+      }
+    }
+
     if (approval.status === ApprovalStatus.PENDING) {
       return { status: 'pending', approvalId }
     }
@@ -326,11 +380,6 @@ export class PublishService {
         { approvalId, status: approval.status },
       )
     }
-
-    const session = sessions.require(approval.sessionId)
-    const toolCall = toolCalls.require(approval.toolCallId)
-    const reportId = String(toolCall.args['reportId'])
-    const report = reports.require(reportId)
 
     // —— 绑定复核：批准的是不是现在要发的这一份 ——
     if (report.draftVersion !== approval.draftVersion) {

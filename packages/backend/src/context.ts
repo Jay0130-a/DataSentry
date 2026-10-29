@@ -469,7 +469,7 @@ export async function createAppContext(options: AppContextOptions = {}): Promise
       const result = await publishing.reconcilePublish(sessionId)
       switch (result.status) {
         case 'already-published':
-          return { status: 'already-published' as const }
+          return { status: 'already-published' as const, receiptId: result.receiptId }
         case 'reconciled':
           return { status: 'reconciled' as const, receiptId: result.receipt.receiptId }
         case 'not-delivered':
@@ -659,12 +659,18 @@ export async function createAppContext(options: AppContextOptions = {}): Promise
       return recovery.recover({
         execute: options.execute === true,
         ...(options.sessionIds !== undefined ? { sessionIds: options.sessionIds } : {}),
-        // 恢复执行走的是与手工恢复完全相同的路径：重放原 ToolCall、不重新规划。
+        // 恢复执行走的是与手工恢复相同的路径：重放原 ToolCall、不重新规划。
+        // WAITING_APPROVAL 用 pi 自己的恢复（读 transcript、不重新规划）；
+        // PAUSED 交给 legacy 的检查点恢复——pi 循环目前没有等价的 PAUSED 恢复。
         resume: async (sessionId) => {
-          const outcome = await makeRunner({
-            sessionId,
-            ...(options.plan ? { plan: options.plan } : {}),
-          }).run(sessionId)
+          const session = sessions.require(sessionId)
+          const outcome =
+            agentLoop === 'pi' && session.state === SessionState.WAITING_APPROVAL
+              ? await runWithPiLoop(sessionId, options.plan)
+              : await makeRunner({
+                  sessionId,
+                  ...(options.plan ? { plan: options.plan } : {}),
+                }).run(sessionId)
           return {
             state: outcome.state,
             errorCode: outcome.errorCode,

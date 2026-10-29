@@ -129,6 +129,16 @@ export class PiAgentRunner {
       return this.resume(sessionId)
     }
 
+    // PAUSED 不能当作全新任务重跑：那会删掉 transcript、从 step 0 再执行一遍，
+    // 已完成步骤被重放、步骤号重复。恢复交给 recovery 的检查点路径。
+    if (existing.state === SessionState.PAUSED) {
+      fail(
+        ErrorCode.ILLEGAL_STATE_TRANSITION,
+        `Session ${sessionId} 处于 PAUSED，pi 循环不支持就地恢复；请用 recover --execute 走检查点恢复`,
+        { sessionId, state: existing.state },
+      )
+    }
+
     // 全新一轮：清掉可能残留的对话记录，避免把上一轮的消息带进来。
     this.deps.transcripts.remove(sessionId)
 
@@ -227,7 +237,7 @@ export class PiAgentRunner {
     try {
       await agent.prompt(buildTaskPrompt(this.agentContext(state)))
     } catch (err) {
-      if (!state.denied) {
+      if (!state.denied && !state.fatal) {
         const code = err instanceof DataSentryError ? err.code : ErrorCode.MODEL_CALL_FAILED
         const message = err instanceof Error ? err.message : String(err)
         state.session = this.transition(state, SessionState.FAILED, {
@@ -254,7 +264,7 @@ export class PiAgentRunner {
       return this.outcome(state, {})
     }
 
-    if (state.step > this.maxSteps) {
+    if (state.step >= this.maxSteps) {
       state.session = this.transition(state, SessionState.FAILED, {
         errorCode: ErrorCode.TOOL_EXECUTION_FAILED,
         errorMessage: `超过单任务步骤上限 ${this.maxSteps}，疑似规划器打转`,
@@ -596,7 +606,7 @@ export class PiAgentRunner {
     try {
       await agent.continue()
     } catch (err) {
-      if (!state.denied) {
+      if (!state.denied && !state.fatal) {
         const code = err instanceof DataSentryError ? err.code : ErrorCode.MODEL_CALL_FAILED
         const message = err instanceof Error ? err.message : String(err)
         state.session = this.transition(state, SessionState.FAILED, {
@@ -876,6 +886,30 @@ export class PiAgentRunner {
       args,
       loop: 'pi-agent-core',
     })
+
+    /*
+     * 步骤上限必须在**执行前**检查。
+     *
+     * 只在 agent.prompt()/continue() 返回后检查，对真实模型没有约束力：
+     * 模型可以一直调工具、循环一直不返回，会话就永远到不了那行检查。
+     */
+    if (state.step >= this.maxSteps) {
+      const message = `超过单任务步骤上限 ${this.maxSteps}，疑似规划器打转`
+      toolCalls.finish(record.id, 'failed', {
+        denyCode: ErrorCode.TOOL_EXECUTION_FAILED,
+        denyReason: message,
+      })
+      emit(EventType.ToolCallFailed, {
+        toolCallId: record.id,
+        toolName: call.name,
+        status: 'failed',
+        code: ErrorCode.TOOL_EXECUTION_FAILED,
+        reason: message,
+      })
+      state.fatal = { code: ErrorCode.TOOL_EXECUTION_FAILED, message }
+      state.agent?.abort()
+      return { block: true, reason: message }
+    }
 
     const verdict = this.checkToolCall(
       state,

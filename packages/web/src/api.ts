@@ -348,8 +348,9 @@ export const api = {
   /** 确认并执行发布（执行前会重新核对接收人、格式与文件字节）。 */
   confirmPublish: (approvalId: string) =>
     request<{
-      status: 'pending' | 'published'
+      status: 'pending' | 'published' | 'already-published'
       approvalId?: string
+      receiptId?: string
       message?: string
       receipt?: {
         receiptId: string

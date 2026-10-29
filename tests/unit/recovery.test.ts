@@ -228,3 +228,58 @@ describe('恢复执行：把结论落到状态上', () => {
     expect(approval.status).toBe(ApprovalStatus.PENDING)
   })
 })
+
+describe('恢复死局回归', () => {
+  it('新建未执行的任务报 skip-idle，不会被转成非法的 INIT → PAUSED', async () => {
+    const created = newSession()
+
+    expect(actionOf(created.id)).toBe('skip-idle')
+    const result = await ctx.runRecovery({ execute: true, sessionIds: [created.id] })
+
+    expect(result.errors).toEqual([])
+    expect(ctx.sessions.require(created.id).state).toBe(SessionState.INIT)
+  })
+
+  it('审批已拒绝且调用已结束时，恢复能按 DENIED 收敛而不是空指针', async () => {
+    const created = newSession()
+    ctx.sessions.transition(created.id, 0, SessionState.PLANNING)
+    ctx.sessions.transition(created.id, 1, SessionState.FETCHING)
+
+    const args = { period: '2025-09' }
+    const call = ctx.toolCalls.create({
+      sessionId: created.id,
+      step: 0,
+      toolName: 'mcp__erp__fetch_revenue',
+      sourceSlug: 'erp',
+      paramsHash: hashValue(args),
+      toolVersion: 'v-test',
+      args,
+    })
+    const approval = ctx.approvals.create({
+      sessionId: created.id,
+      workspaceId: 'group-finance',
+      toolCallId: call.id,
+      toolName: call.toolName,
+      toolVersion: call.toolVersion,
+      paramsHash: call.paramsHash,
+      kind: 'tool-call',
+    })
+    ctx.approvals.decide(approval.id, {
+      decision: 'denied',
+      approver: '财务经理',
+      reason: '不允许',
+    })
+    // 模拟「审批已落库、调用已结束，但进程在转会话状态之前挂掉」。
+    ctx.toolCalls.finish(call.id, 'denied', {
+      denyCode: ErrorCode.APPROVAL_DENIED,
+      denyReason: '不允许',
+    })
+    ctx.sessions.transition(created.id, 2, SessionState.WAITING_APPROVAL)
+
+    const result = await ctx.runRecovery({ execute: true, sessionIds: [created.id] })
+
+    expect(result.errors).toEqual([])
+    expect(ctx.sessions.require(created.id).state).toBe(SessionState.BLOCKED)
+    expect(ctx.sessions.require(created.id).errorCode).toBe(ErrorCode.APPROVAL_DENIED)
+  })
+})
