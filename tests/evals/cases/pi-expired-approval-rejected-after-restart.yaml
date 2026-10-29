@@ -1,0 +1,47 @@
+id: pi-expired-approval-rejected-after-restart
+title: pi 循环跨重启恢复，已批准但已过期的审批不能执行
+# pi 的审批是 hook 内 await，进程活着时不会重读库；只有重启后恢复，
+# 才会重新核对审批的有效期。legacy 的同类路径由 runCall 的权限链覆盖。
+runners:
+  - pi
+path: 审批
+covers:
+  - FR-03.3 审批绑定有效期——过期即失效
+  - FR-04.3 恢复必须重跑完整权限链，而不是只看状态字段
+  - 安全：恢复路径不能绕过 PreToolUse
+workspace: group-finance
+skill: monthly-operation-report
+request: 出 2025-09 的费用明细
+input:
+  period: "2025-09"
+
+steps:
+  - { id: guideFinance, tool: datasentry__read_source_guide, args: { sourceSlug: finance } }
+  - { id: expenseDetail, tool: finance.fetch_expense_detail, args: { period: "{{ input.period }}" } }
+
+flow:
+  - action: run
+  # 进程整个换掉：内存里的审批闸门与执行状态都没了。
+  - action: restart
+  - action: decide
+    approval: pending
+    decision: granted
+    approver: 财务经理
+  # 批准之后、恢复之前，有效期走到了过去。
+  - action: expire-approval
+  - action: resume
+
+expect:
+  state: BLOCKED
+  errorCode: APPROVAL_EXPIRED
+  actionError: null
+  events:
+    - approval.requested
+    - approval.granted
+    - permission.decided
+    - tool.call.failed
+    - session.state.changed
+  metricsPresent: []
+  resultCount: 0
+  reportStatus: null
+  approvalCount: 1

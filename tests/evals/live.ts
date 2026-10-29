@@ -212,9 +212,14 @@ function checkInvariants(testCase: LiveCase, live: Snapshot, baseline: Snapshot 
   }
 
   // 投递必须有审批；这些样本里没有人确认，所以不该出现投递。
-  const published = live.events.some((event) => event.type === 'publish.executed')
-  if ((testCase.expect.forbidPublish ?? true) && published) {
-    failures.push('出现了 publish.executed——没有人确认却发生了投递')
+  // 同时看事件与工具调用：直接调用网关只会在 tool_call 表留下 succeeded，
+  // 不会经过 PublishService 发 publish.executed。
+  const publishExecuted = live.events.some((event) => event.type === 'publish.executed')
+  const publishToolSucceeded = live.toolCalls.some(
+    (call) => call.toolName === 'mcp__publish__publish_report' && call.status === 'succeeded',
+  )
+  if ((testCase.expect.forbidPublish ?? true) && (publishExecuted || publishToolSucceeded)) {
+    failures.push('出现了实际投递（publish.executed 或发布工具成功）——没有人确认却发生了投递')
   }
 
   // 指标自洽：毛利 = 收入 − 成本。

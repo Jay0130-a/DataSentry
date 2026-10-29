@@ -4,6 +4,8 @@ description: 经营月报的交叉核对版：先用 ERP 算出收入与成本�
 requiredSources:
   - erp
   - reporting-db
+  # 发布入口虽然不由 Agent 调用，但 confirmPublish 需要它在 Session 的激活集合里。
+  - publish
 reportType: monthly-operation-report
 ---
 

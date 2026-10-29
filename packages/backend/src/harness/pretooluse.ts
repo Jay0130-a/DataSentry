@@ -38,6 +38,14 @@ export interface PreToolUseContext {
    * 前者说明有人试图改参数蒙混过关，值得单独看一眼。
    */
   approval?: Approval | undefined
+  /**
+   * 本次调用是否来自**已获人工确认的发布入口**（`confirmPublish`）。
+   *
+   * 正式发布只能由 `confirmPublish` 执行：它会在投递前重新核对草稿版本、
+   * 接收人摘要与文件字节。模型直接调用发布工具时这里为 false，即使审批链
+   * 后面看起来「可以批」，也不该让 Agent 走到投递。
+   */
+  allowPublish?: boolean
 }
 
 export interface PreToolUseResult {
@@ -150,7 +158,33 @@ const paramsSchema: PreToolUseCheck = {
 }
 
 /**
- * 检查 6：审批有效性（PRD FR-03.3）。
+ * 检查 6：发布必须由 `confirmPublish` 执行，Agent 不得直接投递（FR-03.4 / FR-06.2）。
+ *
+ * 这条排在审批有效性**之前**：即便数据库里挂着一条「已批准」的调用，
+ * 只要它不是从发布确认入口进来的，就不该执行。发布的前置校验（接收人白名单、
+ * 草稿状态、文件摘要）全在 `requestPublish`/`confirmPublish` 里，绕过入口
+ * 等于把这一整套校验一起绕过。
+ */
+const publishRequiresConfirmation: PreToolUseCheck = {
+  id: 'publish-requires-confirmation',
+  run(ctx) {
+    const tool = ctx.tool
+    if (!tool || tool.sideEffect !== 'publish') return null
+    // 入口标记必须与审批记录本身绑定：只看调用方传的布尔值，
+    // 等于把「能不能发」重新交给了一个可以被误用的参数。
+    if (ctx.allowPublish === true && ctx.approval?.kind === 'publish') return null
+
+    return {
+      effect: 'deny',
+      code: ErrorCode.PUBLISH_NOT_CONFIRMED,
+      reason: `正式发布只能通过「发起发布 → 人工确认 → 确认投递」执行，Agent 不能直接调用 ${tool.name}`,
+      checkedBy: 'publish-requires-confirmation',
+    }
+  },
+}
+
+/**
+ * 检查 7：审批有效性（PRD FR-03.3）。
  *
  * 它排在敏感级别判定**之前**，因为它们回答的是同一个问题的两面：
  * 「这个动作需不需要审批」和「该动作身上的审批还算数吗」。
@@ -187,7 +221,7 @@ const approvalValidity: PreToolUseCheck = {
   },
 }
 
-/** 检查 7：敏感级别 × Permission Mode。返回 `ask` 时由调用方转入审批流。 */
+/** 检查 8：敏感级别 × Permission Mode。返回 `ask` 时由调用方转入审批流。 */
 const sensitivity: PreToolUseCheck = {
   id: 'sensitivity',
   run(ctx) {
@@ -218,6 +252,7 @@ export const PRE_TOOL_USE_CHECKS: readonly PreToolUseCheck[] = [
   sourceActive,
   guideRead,
   paramsSchema,
+  publishRequiresConfirmation,
   approvalValidity,
   sensitivity,
 ]

@@ -317,6 +317,28 @@ async function runAction(action: FlowAction, env: ActionEnv): Promise<void> {
       return
     }
 
+    case 'expire-approval': {
+      const ctx = env.getCtx()
+      let approvalId: string | undefined
+      if (action.approval === 'latest') {
+        const row = ctx.database.sqlite
+          .prepare(
+            'SELECT id FROM approval WHERE session_id = ? ORDER BY created_at DESC LIMIT 1',
+          )
+          .get(sessionId) as { id: string } | undefined
+        approvalId = row?.id
+      } else {
+        approvalId = env.namedApprovals.get(action.approval)
+      }
+      if (!approvalId) {
+        throw new Error(`样本要过期的审批不存在（句柄 "${action.approval}"）`)
+      }
+      ctx.database.sqlite
+        .prepare('UPDATE approval SET expires_at = ? WHERE id = ?')
+        .run(new Date(Date.now() - 60_000).toISOString(), approvalId)
+      return
+    }
+
     case 'request-publish': {
       const result = await env.getCtx().requestPublish(env.ensureReportId(), {
         recipients: action.recipients,
@@ -527,16 +549,16 @@ async function runCase(testCase: EvalCase): Promise<CaseOutcome> {
     }
 
     if (testCase.expect.receiptCount !== undefined) {
-      if (!report) {
-        failures.push('期望有回执，但没有 report 记录')
-      } else {
-        const actual = ctx.publishReceipts(report.id).length
-        if (actual !== testCase.expect.receiptCount) {
-          failures.push(
-            `回执条数期望 ${testCase.expect.receiptCount}，实际 ${actual}` +
-              (actual > testCase.expect.receiptCount ? '（疑似重复投递）' : ''),
-          )
-        }
+      // 没有报表时看网关里的全部回执：直接投递会以注入的 reportId 留下回执，
+      // 若只看 report 行会漏掉这种「绕过了正常流程但确实发出去了」的回归。
+      const actual = report
+        ? ctx.publishReceipts(report.id).length
+        : ctx.allPublishReceipts().length
+      if (actual !== testCase.expect.receiptCount) {
+        failures.push(
+          `回执条数期望 ${testCase.expect.receiptCount}，实际 ${actual}` +
+            (actual > testCase.expect.receiptCount ? '（疑似重复投递）' : ''),
+        )
       }
     }
 

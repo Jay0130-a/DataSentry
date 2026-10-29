@@ -68,6 +68,18 @@ export const flowActionSchema = z.discriminatedUnion('action', [
   z.object({ action: z.literal('tamper-params') }),
 
   /**
+   * 把一条审批的有效期拨到过去。
+   *
+   * 用来构造「已经批准、但恢复时已过期」：决定与过期之间的时间窗口在真实系统里
+   * 客观存在（审批可能跨天），恢复路径必须重新核对有效期，而不是只看状态字段。
+   */
+  z.object({
+    action: z.literal('expire-approval'),
+    /** 审批句柄；`latest` 表示该 Session 最近一条审批（不论当前状态）。 */
+    approval: z.string().default('latest'),
+  }),
+
+  /**
    * 精确复现「网关已投递、进程在记账之前挂掉」那个窗口。
    *
    * 做法是把记账回退到投递前的样子（报表回 draft、会话回 WAITING_APPROVAL），

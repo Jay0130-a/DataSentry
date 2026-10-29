@@ -1,13 +1,15 @@
+import { createHash } from 'node:crypto'
 import {
   appendFileSync,
   copyFileSync,
   existsSync,
   mkdirSync,
   readFileSync,
+  realpathSync,
   rmSync,
   writeFileSync,
 } from 'node:fs'
-import { dirname, join } from 'node:path'
+import { basename, dirname, isAbsolute, join, relative, sep } from 'node:path'
 import { ErrorCode, hashValue, newId } from '@datasentry/core'
 import { composeReportMail } from '../../email/compose.ts'
 import { sendMail } from '../../email/sender.ts'
@@ -118,6 +120,112 @@ export function hasPublishIntent(receiptsFile: string, key: string): boolean {
 }
 
 /**
+ * 文件名或目录名只能是一个路径段。
+ *
+ * 除了 `/`、`\`、`..`，还要挡住 Windows 上会被解释成别的东西的写法：
+ * 保留设备名（NUL/CON/COM1…）、结尾的点或空格、`:` 数据流、控制字符。
+ * 这些名字在 Linux 上合法、在 Windows 上却指向另一个对象，投递落点会失真。
+ */
+function assertSafePathSegment(value: string, label: string): void {
+  if (
+    !value ||
+    value === '.' ||
+    value === '..' ||
+    basename(value) !== value ||
+    value.includes('/') ||
+    value.includes('\\') ||
+    value.includes(':') ||
+    /[\u0000-\u001f]/.test(value) ||
+    value.endsWith('.') ||
+    value.endsWith(' ')
+  ) {
+    throw new ToolExecutionError(
+      ErrorCode.SCHEMA_INVALID,
+      `${label} 必须是安全的路径片段（不能包含分隔符、..、冒号或首尾空白）：${JSON.stringify(value)}`,
+    )
+  }
+}
+
+const WINDOWS_RESERVED_NAME = /^(con|prn|aux|nul|com[1-9]|lpt[1-9])(\..*)?$/i
+
+function assertNotReservedDeviceName(value: string, label: string): void {
+  if (WINDOWS_RESERVED_NAME.test(value)) {
+    throw new ToolExecutionError(
+      ErrorCode.SCHEMA_INVALID,
+      `${label} 不能是 Windows 保留设备名：${JSON.stringify(value)}`,
+    )
+  }
+}
+
+function assertSafeFileName(fileName: string): void {
+  assertSafePathSegment(fileName, 'fileName')
+  assertNotReservedDeviceName(fileName, 'fileName')
+}
+
+function assertInside(root: string, target: string, label: string): void {
+  const rel = relative(root, target)
+  if (!rel || rel === '..' || rel.startsWith(`..${sep}`) || isAbsolute(rel)) {
+    throw new ToolExecutionError(
+      ErrorCode.SCHEMA_INVALID,
+      `${label} 必须位于允许的目录内：${target}`,
+    )
+  }
+}
+
+/**
+ * 投递前复核文件本身。
+ *
+ * 审批绑定的是 sha256 承诺的那几个字节，网关是最后一道能证明「发出去的到底是哪份文件」
+ * 的位置：路径必须落在产物目录内，摘要与大小必须由当前文件现算。上游 `confirmPublish`
+ * 也做同样的检查，但网关是独立进程内 handler，不能假设调用方一定走过那条路径。
+ */
+function verifyArtifact(input: {
+  artifactPath: string
+  artifactsRoot: string
+  sha256: string
+  sizeBytes: number
+}): string {
+  mkdirSync(input.artifactsRoot, { recursive: true })
+
+  let resolved: string
+  try {
+    resolved = realpathSync(input.artifactPath)
+  } catch {
+    throw new ToolExecutionError(
+      ErrorCode.APPROVAL_PARAMS_DRIFT,
+      `要发布的文件不存在或不可读：${input.artifactPath}`,
+    )
+  }
+
+  const root = realpathSync(input.artifactsRoot)
+  assertInside(root, resolved, 'artifactPath')
+
+  let bytes: Buffer
+  try {
+    bytes = readFileSync(resolved)
+  } catch {
+    throw new ToolExecutionError(
+      ErrorCode.APPROVAL_PARAMS_DRIFT,
+      `要发布的文件不可读（可能是目录或权限不足）：${input.artifactPath}`,
+    )
+  }
+  const actualSha = createHash('sha256').update(bytes).digest('hex')
+  if (actualSha !== input.sha256) {
+    throw new ToolExecutionError(
+      ErrorCode.APPROVAL_PARAMS_DRIFT,
+      `待发布文件的内容与审批绑定的摘要不一致（绑定 ${input.sha256.slice(0, 12)}…，实算 ${actualSha.slice(0, 12)}…）`,
+    )
+  }
+  if (bytes.length !== input.sizeBytes) {
+    throw new ToolExecutionError(
+      ErrorCode.APPROVAL_PARAMS_DRIFT,
+      `待发布文件大小与绑定不一致（绑定 ${input.sizeBytes} 字节，实际 ${bytes.length} 字节）`,
+    )
+  }
+  return resolved
+}
+
+/**
  * 模拟报表发布网关。
  *
  * 除幂等去重与「把文件放进投递仓库」之外它什么也不做——但这两件正是这里需要的：
@@ -132,6 +240,8 @@ export const publishGatewayHandlers: LocalToolHandlerMap = {
     if (!file) throw new Error('publish-gateway 缺少 options.file')
 
     const reportId = String(args['reportId'])
+    assertSafePathSegment(reportId, 'reportId')
+    assertNotReservedDeviceName(reportId, 'reportId')
     const draftVersion = String(args['draftVersion'])
     const recipients = normalizeRecipients((args['recipients'] as unknown[]).map(String))
     const channel = String(args['channel'])
@@ -141,6 +251,8 @@ export const publishGatewayHandlers: LocalToolHandlerMap = {
     const sha256 = String(args['sha256'])
     const sizeBytes = Number(args['sizeBytes'])
     const mimeType = String(args['mimeType'])
+
+    assertSafeFileName(fileName)
 
     const key = publishDedupeKey({ reportId, draftVersion, recipients, channel, format })
 
@@ -174,6 +286,14 @@ export const publishGatewayHandlers: LocalToolHandlerMap = {
         { key },
       )
     }
+
+    // 走到这里说明不是去重命中：真正投递前先证明「发出去的是审批绑定的那份文件」。
+    const verifiedArtifactPath = verifyArtifact({
+      artifactPath,
+      artifactsRoot: ctx.paths.artifacts,
+      sha256,
+      sizeBytes,
+    })
 
     let transport: PublishReceipt['transport'] = 'simulated'
     let messageId: string | null = null
@@ -218,7 +338,7 @@ export const publishGatewayHandlers: LocalToolHandlerMap = {
               to: recipients,
               subject: composed.subject,
               text: composed.text,
-              attachments: [{ filename: fileName, path: artifactPath, contentType: mimeType }],
+              attachments: [{ filename: fileName, path: verifiedArtifactPath, contentType: mimeType }],
             },
             ctx.paths,
           )
@@ -247,7 +367,7 @@ export const publishGatewayHandlers: LocalToolHandlerMap = {
           const sent = await sendWecomFile({
             baseUrl: wecomBaseUrlOf(),
             webhookKey,
-            filePath: artifactPath,
+            filePath: verifiedArtifactPath,
             fileName,
             summaryMarkdown: composeImSummary({
               reportId,
@@ -277,10 +397,12 @@ export const publishGatewayHandlers: LocalToolHandlerMap = {
     }
 
     // 投递仓库留一份：无论真实发送还是模拟渠道，落点与字节都要能复核。
-    const outDir = join(dirname(file), reportId)
+    const publishedRoot = dirname(file)
+    const outDir = join(publishedRoot, reportId)
+    assertInside(publishedRoot, outDir, 'reportId')
     mkdirSync(outDir, { recursive: true })
     const deliveredPath = join(outDir, fileName)
-    copyFileSync(artifactPath, deliveredPath)
+    copyFileSync(verifiedArtifactPath, deliveredPath)
 
     const receipt: PublishReceipt = {
       receiptId: newId('rcpt'),

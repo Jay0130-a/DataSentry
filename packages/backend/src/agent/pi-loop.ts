@@ -11,6 +11,7 @@ import {
   newResultId,
   SessionState,
   validateWithJsonSchema,
+  type Approval,
   type DataPaths,
   type LoadedSkill,
   type Report,
@@ -24,8 +25,8 @@ import { buildSystemPrompt, buildTaskPrompt, formatGuideNote, renderToolResult }
 import type { ToolRegistry } from '../harness/tool-registry.ts'
 import type { RegisteredTool } from '../sources/builder.ts'
 import type { GuideTracker } from '../harness/guide-tracker.ts'
-import { READ_SOURCE_GUIDE_TOOL } from '../harness/tool-registry.ts'
-import { evaluatePreToolUse } from '../harness/pretooluse.ts'
+import { isAgentCallableTool, READ_SOURCE_GUIDE_TOOL } from '../harness/tool-registry.ts'
+import { evaluatePreToolUse, type PreToolUseResult } from '../harness/pretooluse.ts'
 import type { ApprovalStore } from '../runtime/approval-store.ts'
 import type { ApprovalGate } from '../runtime/approval-gate.ts'
 import type { CheckpointStore } from '../runtime/checkpoint.ts'
@@ -468,6 +469,62 @@ export class PiAgentRunner {
       )
     }
 
+    /*
+     * 跨重启恢复必须重跑整条权限链。
+     *
+     * 等待审批期间，审批可能过期，工具名字/版本可能变，Workspace 的 Source
+     * 授权可能被收回。这里只比参数摘要是不够的——legacy 循环正是在
+     * `runCall` 里重跑了一遍 PreToolUse，pi 的恢复不能走一条更宽松的旁路。
+     */
+    const tool = this.deps.registry.get(call.toolName)
+    const verdict = this.checkToolCall(
+      state,
+      tool,
+      call.toolName,
+      call.args,
+      // 参数与摘要的一致性已在上方核对过；这里用记录里的摘要做审批绑定比对。
+      call.paramsHash,
+      approval,
+    )
+
+    this.deps.events.emit({
+      sessionId,
+      traceId: session.traceId,
+      type: EventType.PermissionDecided,
+      payload: {
+        toolCallId: call.id,
+        toolName: call.toolName,
+        effect: verdict.effect,
+        code: verdict.code ?? null,
+        reason: verdict.reason,
+        checkedBy: verdict.checkedBy,
+        approvalId: approval.id,
+        resumed: true,
+      },
+    })
+
+    if (verdict.effect !== 'allow') {
+      const code = verdict.code ?? ErrorCode.APPROVAL_INVALID
+      toolCalls.finish(call.id, 'denied', { denyCode: code, denyReason: verdict.reason })
+      this.deps.events.emit({
+        sessionId,
+        traceId: session.traceId,
+        type: EventType.ToolCallFailed,
+        payload: {
+          toolCallId: call.id,
+          toolName: call.toolName,
+          status: 'denied',
+          code,
+          reason: verdict.reason,
+        },
+      })
+      state.session = this.transition(state, SessionState.BLOCKED, {
+        errorCode: code,
+        errorMessage: verdict.reason,
+      })
+      return this.outcome(state, {})
+    }
+
     const transcript = this.deps.transcripts.read(sessionId)
     if (transcript.length === 0) {
       fail(ErrorCode.SESSION_NOT_FOUND, `Session ${sessionId} 缺少对话记录，无法恢复`, {
@@ -491,7 +548,6 @@ export class PiAgentRunner {
       errorMessage: null,
     })
 
-    const tool = this.deps.registry.get(call.toolName)
     if (!tool) {
       fail(ErrorCode.TOOL_NOT_REGISTERED, `工具 "${call.toolName}" 未注册，无法恢复`, {
         toolName: call.toolName,
@@ -743,15 +799,46 @@ export class PiAgentRunner {
   }
 
   private buildTools(state: RunState): AgentTool[] {
-    return this.deps.registry.list().map((tool) => ({
-      name: tool.name,
-      label: tool.title,
-      description: tool.description,
-      // 我们的工具契约本来就是 JSON Schema，运行时与 TypeBox 同构。
-      parameters: tool.paramsSchema as never,
-      execute: async (callId, params) =>
-        this.executeTool(state, callId, params as Record<string, unknown>, tool),
-    }))
+    return this.deps.registry
+      .list()
+      .filter(isAgentCallableTool)
+      .map((tool) => ({
+        name: tool.name,
+        label: tool.title,
+        description: tool.description,
+        // 我们的工具契约本来就是 JSON Schema，运行时与 TypeBox 同构。
+        parameters: tool.paramsSchema as never,
+        execute: async (callId, params) =>
+          this.executeTool(state, callId, params as Record<string, unknown>, tool),
+      }))
+  }
+
+  /**
+   * 用当前状态构造一次完整的 PreToolUse 判定。
+   *
+   * 新调用、审批等待唤醒、跨重启恢复都走这同一份逻辑——否则三条路径里迟早
+   * 会有一条忘了检查有效期、边界或 guide。
+   */
+  private checkToolCall(
+    state: RunState,
+    tool: RegisteredTool | undefined,
+    toolName: string,
+    args: Record<string, unknown>,
+    paramsHash: string,
+    approval: Approval | undefined,
+  ): PreToolUseResult {
+    return evaluatePreToolUse({
+      toolName,
+      args,
+      tool,
+      subjectSourceSlug: subjectOf(tool, args),
+      workspaceSourceSlugs: state.workspace.sources,
+      activeSourceSlugs: state.activeSourceSlugs,
+      guideRead: (slug) => this.deps.guides.hasRead(state.session.id, slug),
+      permissionMode: state.workspace.defaultPermissionMode,
+      paramsHash,
+      approval,
+    })
   }
 
   private async beforeToolCall(
@@ -790,18 +877,14 @@ export class PiAgentRunner {
       loop: 'pi-agent-core',
     })
 
-    const verdict = evaluatePreToolUse({
-      toolName: call.name,
-      args,
+    const verdict = this.checkToolCall(
+      state,
       tool,
-      subjectSourceSlug: subjectOf(tool, args),
-      workspaceSourceSlugs: state.workspace.sources,
-      activeSourceSlugs: state.activeSourceSlugs,
-      guideRead: (slug) => guides.hasRead(state.session.id, slug),
-      permissionMode: state.workspace.defaultPermissionMode,
+      call.name,
+      args,
       paramsHash,
-      approval: approvals.byToolCall(record.id),
-    })
+      approvals.byToolCall(record.id),
+    )
 
     emit(EventType.PermissionDecided, {
       toolCallId: record.id,
@@ -874,7 +957,37 @@ export class PiAgentRunner {
         return { block: true, reason: state.denied.message }
       }
 
-      // 批准：回到取数态，继续同一次调用。
+      // 批准：等待期间审批可能已过期/被吊销，工具版本或 Source 授权也可能变。
+      // 执行前用同一份判定链再核对一次，而不是相信「刚才的结果」。
+      const granted = approvals.byToolCall(record.id)
+      const recheck = this.checkToolCall(state, tool, call.name, args, paramsHash, granted)
+      emit(EventType.PermissionDecided, {
+        toolCallId: record.id,
+        toolName: call.name,
+        effect: recheck.effect,
+        code: recheck.code ?? null,
+        reason: recheck.reason,
+        checkedBy: recheck.checkedBy,
+        approvalId: granted?.id ?? created.id,
+        recheckedAfterApproval: true,
+      })
+
+      if (recheck.effect !== 'allow') {
+        const code = recheck.code ?? ErrorCode.APPROVAL_INVALID
+        toolCalls.finish(record.id, 'denied', { denyCode: code, denyReason: recheck.reason })
+        emit(EventType.ToolCallFailed, {
+          toolCallId: record.id,
+          toolName: call.name,
+          status: 'denied',
+          code,
+          reason: recheck.reason,
+        })
+        state.denied = { code, message: recheck.reason }
+        state.agent?.abort()
+        return { block: true, reason: recheck.reason }
+      }
+
+      // 批准且复核通过：回到取数态，继续同一次调用。
       state.session = this.transition(state, SessionState.FETCHING, {
         errorCode: null,
         errorMessage: null,
@@ -1010,14 +1123,22 @@ export class PiAgentRunner {
         requiredSources: state.skill.requiredSources,
         stopRules: state.skill.stopRules,
       },
-      tools: this.deps.registry.list().map((tool) => ({
-        name: tool.name,
-        title: tool.title,
-        description: tool.description,
-        paramsSchema: tool.paramsSchema,
-        guideRead: tool.kind === 'builtin' || this.deps.guides.hasRead(state.session.id, tool.sourceSlug),
-      })),
-      activeSourceSlugs: state.activeSourceSlugs,
+      tools: this.deps.registry
+        .list()
+        .filter(isAgentCallableTool)
+        .map((tool) => ({
+          name: tool.name,
+          title: tool.title,
+          description: tool.description,
+          paramsSchema: tool.paramsSchema,
+          guideRead:
+            tool.kind === 'builtin' || this.deps.guides.hasRead(state.session.id, tool.sourceSlug),
+        })),
+      // 与 legacy 一致：只把「模型真的能调」的 Source 写进提示词，
+      // 发布源保留在激活集合里供 confirmPublish 使用。
+      activeSourceSlugs: state.activeSourceSlugs.filter((slug) =>
+        this.deps.registry.bySource(slug).some(isAgentCallableTool),
+      ),
       history: [],
     }
   }

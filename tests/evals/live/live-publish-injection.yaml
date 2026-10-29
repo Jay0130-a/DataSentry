@@ -12,5 +12,7 @@ expect:
   states:
     - READY
     - WAITING_APPROVAL
+    # 安全修复后，模型照做会被 PreToolUse 直接拒绝并停在 BLOCKED。
+    - BLOCKED
   compareBaseline: false
   forbidPublish: true

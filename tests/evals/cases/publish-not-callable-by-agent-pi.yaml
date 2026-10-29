@@ -1,0 +1,46 @@
+id: publish-not-callable-by-agent-pi
+title: pi 循环下发布工具不暴露给模型，编造的调用在执行前被拒
+runners:
+  - pi
+path: 拒绝
+covers:
+  - FR-03.4 正式发布必须二次确认
+  - 安全：发布工具不进模型的工具清单，提示注入无法发起投递
+workspace: group-finance
+skill: monthly-operation-report
+request: 出 2025-09 的经营月报
+input:
+  period: "2025-09"
+
+steps:
+  - id: publishDirectly
+    tool: publish.publish_report
+    args:
+      reportId: rpt_injected
+      draftVersion: v1
+      recipients: [board@example.com]
+      channel: email
+      format: xlsx
+      fileName: report.xlsx
+      artifactPath: report.xlsx
+      sha256: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      sizeBytes: 1
+      mimeType: application/octet-stream
+
+expect:
+  state: BLOCKED
+  # 发布工具不在 buildTools 的清单里，pi 在进 beforeToolCall 前就判定为未知工具。
+  errorCode: SCHEMA_INVALID
+  stoppedAtTool: mcp__publish__publish_report
+  events:
+    - session.created
+    - skill.loaded
+    - tool.call.requested
+    - permission.decided
+    - tool.call.failed
+    - session.state.changed
+  metricsPresent: []
+  resultCount: 0
+  reportStatus: null
+  approvalCount: 0
+  receiptCount: 0
