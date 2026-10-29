@@ -1,0 +1,138 @@
+{
+  "slug": "reporting-db",
+  "title": "经营报表库（Postgres）",
+  "description": "集团报表库的只读入口。每个工具对应一条固定查询：模型只能填参数，不能写 SQL。",
+  "type": "postgres",
+  "auth": {
+    "type": "none"
+  },
+  "transport": {
+    "connectionStringEnv": "DATASENTRY_PG_URL",
+    "dataDir": "pg",
+    "timeoutMs": 10000
+  },
+  "guide": "guide.md",
+  "tools": [
+    {
+      "name": "list_business_units",
+      "title": "查询事业部列表",
+      "description": "返回报表库里登记的事业部编码与名称，用于确定统计范围。",
+      "sensitivity": "internal",
+      "sideEffect": "read",
+      "paramsSchema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      },
+      "resultSchema": {
+        "type": "object",
+        "properties": {
+          "rows": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "code": { "type": "string" },
+                "name": { "type": "string" }
+              },
+              "required": ["code", "name"],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": ["rows"],
+        "additionalProperties": false
+      },
+      "sql": "select code, name from dim_business_unit order by code",
+      "params": []
+    },
+    {
+      "name": "revenue_by_bu",
+      "title": "按事业部查询收入",
+      "description": "返回指定会计期间、指定事业部的主营业务收入。buCodes 必须来自 list_business_units。",
+      "sensitivity": "internal",
+      "sideEffect": "read",
+      "paramsSchema": {
+        "type": "object",
+        "properties": {
+          "period": {
+            "type": "string",
+            "pattern": "^[0-9]{4}-[0-9]{2}$"
+          },
+          "buCodes": {
+            "type": "array",
+            "items": { "type": "string", "minLength": 1 },
+            "minItems": 1
+          }
+        },
+        "required": ["period", "buCodes"],
+        "additionalProperties": false
+      },
+      "resultSchema": {
+        "type": "object",
+        "properties": {
+          "rows": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "buCode": { "type": "string" },
+                "revenue": { "type": "number" }
+              },
+              "required": ["buCode", "revenue"],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": ["rows"],
+        "additionalProperties": false
+      },
+      "sql": "select bu_code as \"buCode\", sum(revenue)::float8 as revenue from fact_revenue where period = $1 and bu_code = any($2::text[]) group by bu_code order by bu_code",
+      "params": ["period", "buCodes"]
+    },
+    {
+      "name": "cost_by_bu",
+      "title": "按事业部查询成本",
+      "description": "返回指定会计期间、指定事业部的主营业务成本。buCodes 必须来自 list_business_units。",
+      "sensitivity": "internal",
+      "sideEffect": "read",
+      "paramsSchema": {
+        "type": "object",
+        "properties": {
+          "period": {
+            "type": "string",
+            "pattern": "^[0-9]{4}-[0-9]{2}$"
+          },
+          "buCodes": {
+            "type": "array",
+            "items": { "type": "string", "minLength": 1 },
+            "minItems": 1
+          }
+        },
+        "required": ["period", "buCodes"],
+        "additionalProperties": false
+      },
+      "resultSchema": {
+        "type": "object",
+        "properties": {
+          "rows": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "buCode": { "type": "string" },
+                "cost": { "type": "number" }
+              },
+              "required": ["buCode", "cost"],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": ["rows"],
+        "additionalProperties": false
+      },
+      "sql": "select bu_code as \"buCode\", sum(cost)::float8 as cost from fact_cost where period = $1 and bu_code = any($2::text[]) group by bu_code order by bu_code",
+      "params": ["period", "buCodes"]
+    }
+  ]
+}

@@ -1,0 +1,48 @@
+id: sensitive-requires-approval
+title: 读取费用明细挂起等待审批
+path: 审批
+covers:
+  - FR-03 验收标准：无审批直读费用被拒（APPROVAL_REQUIRED）
+  - FR-03.2 PreToolUse 检查链
+  - FR-04.1 状态机进入 WAITING_APPROVAL
+workspace: group-finance
+skill: monthly-operation-report
+request: 出 2025-09 的费用明细
+input:
+  period: "2025-09"
+
+steps:
+  - id: guideFinance
+    tool: datasentry__read_source_guide
+    args:
+      sourceSlug: finance
+
+  - id: expenseDetail
+    tool: finance.fetch_expense_detail
+    args:
+      period: "{{ input.period }}"
+
+# 只跑到挂起为止，不批准也不恢复
+flow:
+  - action: run
+
+expect:
+  # M2 起不再是 BLOCKED：任务停在审批等待上，而不是被当作失败处理
+  state: WAITING_APPROVAL
+  errorCode: null
+  actionError: null
+  stoppedAtTool: mcp__finance__fetch_expense_detail
+  events:
+    - session.created
+    - skill.loaded
+    - guide.read
+    - tool.call.requested
+    - permission.decided
+    - approval.requested
+    # 先转状态、再落检查点，所以检查点记录的是 WAITING_APPROVAL 与审批引用
+    - session.state.changed
+    - checkpoint.saved
+  metricsPresent: []
+  resultCount: 0
+  reportStatus: null
+  approvalCount: 1

@@ -1,0 +1,36 @@
+id: recovery-reports-pending-approval
+title: 重启后扫描如实报告「仍在等审批」
+path: 重启恢复
+covers:
+  - FR-04.2 检查点记录 state / step / approval_ref
+  - FR-04 验收标准：服务重启后能从最后检查点恢复
+workspace: group-finance
+skill: monthly-operation-report
+request: 出 2025-09 的费用明细
+input:
+  period: "2025-09"
+
+steps:
+  - { id: guideFinance, tool: datasentry__read_source_guide, args: { sourceSlug: finance } }
+  - { id: expenseDetail, tool: finance.fetch_expense_detail, args: { period: "{{ input.period }}" } }
+
+flow:
+  - action: run
+  - action: restart
+  # 只读扫描 + 状态收敛：等审批的任务本来就处于稳定态，什么都不该被改动
+  - action: recover
+    execute: false
+
+expect:
+  state: WAITING_APPROVAL
+  errorCode: null
+  actionError: null
+  recoveryAction: awaiting-approval
+  events:
+    - approval.requested
+    - session.state.changed
+    - checkpoint.saved
+  metricsPresent: []
+  resultCount: 0
+  reportStatus: null
+  approvalCount: 1

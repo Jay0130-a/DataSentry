@@ -1,0 +1,60 @@
+{
+  "slug": "excel",
+  "title": "手工调整表（Excel）",
+  "description": "财务共享中心维护的 Excel 手工调整项。跨期收入调整、冲销更正等不在系统内流转的部分落在这张表里。",
+  "type": "local",
+  "auth": {
+    "type": "none"
+  },
+  "transport": {
+    "module": "excel-manual-adjustments",
+    "options": {
+      "file": "${DATA_DIR}/manual-adjustments.xlsx",
+      "sheet": "调整项"
+    }
+  },
+  "guide": "guide.md",
+  "tools": [
+    {
+      "name": "fetch_manual_adjustments",
+      "title": "读取手工调整项",
+      "description": "读取指定期间的 Excel 手工调整明细。返回的每一条都必须带调整事由，无事的调整项不得入报表。",
+      "sensitivity": "internal",
+      "sideEffect": "read",
+      "requiresGuide": true,
+      "paramsSchema": {
+        "type": "object",
+        "properties": {
+          "period": { "type": "string", "pattern": "^[0-9]{4}-(0[1-9]|1[0-2])$" }
+        },
+        "required": ["period"],
+        "additionalProperties": false
+      },
+      "resultSchema": {
+        "type": "object",
+        "properties": {
+          "period": { "type": "string" },
+          "fileVersion": { "type": "string" },
+          "rows": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "buCode": { "type": "string" },
+                "buName": { "type": "string" },
+                "amount": { "type": "number" },
+                "reason": { "type": "string", "minLength": 1 },
+                "preparedBy": { "type": "string" }
+              },
+              "required": ["buCode", "buName", "amount", "reason", "preparedBy"],
+              "additionalProperties": false
+            }
+          },
+          "totalAdjustment": { "type": "number" }
+        },
+        "required": ["period", "fileVersion", "rows", "totalAdjustment"],
+        "additionalProperties": false
+      }
+    }
+  ]
+}

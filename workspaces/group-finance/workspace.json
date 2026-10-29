@@ -1,0 +1,32 @@
+{
+  "id": "group-finance",
+  "name": "集团财务共享中心",
+  "sources": ["erp", "finance", "warehouse", "excel", "publish", "reporting-db"],
+  "skills": ["monthly-operation-report", "monthly-crosscheck"],
+  "defaultPermissionMode": "ask",
+  "ruleVersion": "rules-2025.09",
+  "allowedRecipients": [
+    "board@example.com",
+    "finance-shared@example.com",
+    "bu-managers@example.com",
+    "audit@example.com"
+  ],
+  "metrics": {
+    "inputs": {
+      "revenue": { "tool": "erp.fetch_revenue", "field": "totalRevenue" },
+      "cost": { "tool": "erp.fetch_cost", "field": "totalCost" },
+      "budgetRevenue": { "tool": "finance.fetch_budget", "field": "totalBudgetRevenue" },
+      "warehouseRevenue": { "tool": "warehouse.query_monthly_aggregate", "field": "totalRevenue" },
+      "orderCount": { "tool": "warehouse.query_monthly_aggregate", "field": "totalOrders" },
+      "adjustment": { "tool": "excel.fetch_manual_adjustments", "field": "totalAdjustment" }
+    },
+    "required": ["revenue", "cost", "grossProfit"]
+  },
+  "approvalPolicy": {
+    "confidential": ["finance-approver", "cfo"],
+    "publish": ["finance-approver", "cfo"]
+  },
+  "segregationOfDuties": true,
+  "currency": "CNY",
+  "timezone": "Asia/Shanghai"
+}

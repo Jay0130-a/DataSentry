@@ -1,0 +1,10 @@
+{
+  "model": {
+    "provider": "mock",
+    "apiKeyEnv": "DATASENTRY_MODEL_API_KEY",
+    "baseUrlEnv": "DATASENTRY_MODEL_BASE_URL",
+    "maxTokens": 16000,
+    "effort": "high",
+    "thinking": true
+  }
+}

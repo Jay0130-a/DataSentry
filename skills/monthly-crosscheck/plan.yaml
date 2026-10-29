@@ -1,0 +1,50 @@
+# 经营月报（报表库交叉核对）的确定性执行计划。
+#
+# 与 monthly-operation-report 的区别只有最后两步：同一期间、同一批事业部，
+# 再从经营报表库（真实 Postgres）取一遍收入与成本。
+# 指标仍按 ERP 口径计算——报表库用来核对，不替它做数。
+
+steps:
+  - id: guideErp
+    tool: datasentry__read_source_guide
+    args:
+      sourceSlug: erp
+    description: 读取 ERP guide
+
+  - id: guideReporting
+    tool: datasentry__read_source_guide
+    args:
+      sourceSlug: reporting-db
+    description: 读取经营报表库 guide
+
+  - id: businessUnits
+    tool: erp.list_business_units
+    description: 用 ERP 主数据确定统计范围
+
+  - id: revenue
+    tool: erp.fetch_revenue
+    args:
+      period: "{{ input.period }}"
+      buCodes: "{{ steps.businessUnits.data.businessUnits | pluck:code }}"
+    description: 取主营收入（ERP）
+
+  - id: cost
+    tool: erp.fetch_cost
+    args:
+      period: "{{ input.period }}"
+      buCodes: "{{ steps.businessUnits.data.businessUnits | pluck:code }}"
+    description: 取主营成本（ERP）
+
+  - id: pgRevenue
+    tool: reporting-db.revenue_by_bu
+    args:
+      period: "{{ input.period }}"
+      buCodes: "{{ steps.businessUnits.data.businessUnits | pluck:code }}"
+    description: 从报表库取同一期间、同一批事业部的收入
+
+  - id: pgCost
+    tool: reporting-db.cost_by_bu
+    args:
+      period: "{{ input.period }}"
+      buCodes: "{{ steps.businessUnits.data.businessUnits | pluck:code }}"
+    description: 从报表库取同一期间、同一批事业部的成本

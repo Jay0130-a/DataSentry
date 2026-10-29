@@ -1,0 +1,49 @@
+id: publish-requires-confirmation
+title: 发布必须经过人工二次确认
+path: 发布变化
+covers:
+  - FR-03.4 正式发布单独二次确认，绑定草稿版本和接收人
+  - FR-06.2 发布确认绑定草稿版本和接收人
+  - FR-06.1 发布前检查完整性、指标冲突、数据版本、接收人范围
+workspace: group-finance
+skill: monthly-operation-report
+request: 出 2025-09 的经营月报并发给管理层
+input:
+  period: "2025-09"
+
+flow:
+  - action: run
+  # 发起发布：前置校验 + 生成绑定到「草稿版本 + 接收人 + 渠道」的待确认项
+  - action: request-publish
+    id: publishA
+    recipients:
+      - board@example.com
+      - finance-shared@example.com
+    channel: email
+  - action: decide
+    approval: publishA
+    decision: granted
+    approver: 财务总监
+    reason: 数字已核对，可以发
+  - action: confirm-publish
+    approval: publishA
+
+expect:
+  state: DONE
+  errorCode: null
+  actionError: null
+  events:
+    - report.drafted
+    - session.completed
+    # 草稿产出之后才可能有发布动作，顺序不能反
+    - publish.confirmation.requested
+    - approval.granted
+    - publish.executed
+    - receipt.received
+    - session.state.changed
+  metricsPresent:
+    - revenue
+    - grossProfit
+  resultCount: 6
+  reportStatus: published
+  approvalCount: 1

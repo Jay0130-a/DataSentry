@@ -1,0 +1,48 @@
+id: approval-params-drift-rejected-after-restart
+title: pi 循环跨重启恢复，参数与摘要对不上即拒绝
+# 与 legacy 样本覆盖同一条性质，但流程形状不同：
+# pi 的审批是「hook 内 await」，进程活着时参数一直在内存里、不会与摘要分叉；
+# 只有杀掉进程再恢复，才会从库里重读参数——这才是可被篡改的路径。
+runners:
+  - pi
+path: 审批漂移
+covers:
+  - FR-03.3 审批绑定参数摘要——参数一变审批就失效
+  - FR-04.3 审批恢复必须校验参数摘要
+  - 安全：跨进程恢复必须由参数现算摘要，不能相信库里的摘要字段
+workspace: group-finance
+skill: monthly-operation-report
+request: 出 2025-09 的费用明细
+input:
+  period: "2025-09"
+
+steps:
+  - { id: guideFinance, tool: datasentry__read_source_guide, args: { sourceSlug: finance } }
+  - { id: expenseDetail, tool: finance.fetch_expense_detail, args: { period: "{{ input.period }}" } }
+
+flow:
+  - action: run
+  # 进程整个换掉：内存里的参数没了，恢复只能从 tool_call 表重读。
+  - action: restart
+  # 批的是 2025-09，这里把参数偷偷改成 2025-08，**不动**参数摘要字段。
+  - action: tamper-params
+  - action: decide
+    approval: pending
+    decision: granted
+    approver: 财务经理
+  - action: resume
+
+expect:
+  state: BLOCKED
+  errorCode: APPROVAL_PARAMS_DRIFT
+  actionError: null
+  events:
+    - approval.requested
+    - approval.granted
+    - tool.call.failed
+    - session.state.changed
+  metricsPresent: []
+  # 被驳回的调用没有产出任何结果
+  resultCount: 0
+  reportStatus: null
+  approvalCount: 1

@@ -1,0 +1,47 @@
+{
+  "name": "datasentry",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "DataSentry — 企业内部报表 Agent 工作台",
+  "engines": {
+    "node": ">=22.5.0"
+  },
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json",
+    "typecheck:web": "npm --workspace @datasentry/web run typecheck",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "seed": "tsx packages/mcp-sources/src/seed-cli.ts",
+    "seed:pg": "tsx scripts/seed-reporting-db.ts",
+    "eval": "tsx tests/evals/run.ts",
+    "eval:live": "tsx tests/evals/live.ts",
+    "smoke": "tsx scripts/smoke-api.ts",
+    "dev": "tsx packages/backend/src/main.ts",
+    "mail": "tsx scripts/smtp-sink.ts",
+    "dev:web": "npm --workspace @datasentry/web run dev",
+    "build:web": "npm --workspace @datasentry/web run build",
+    "cli": "tsx packages/backend/src/cli.ts"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.13",
+    "@types/mailparser": "^3.9.0",
+    "@types/node": "^24.0.0",
+    "@types/nodemailer": "^8.0.2",
+    "@types/pg": "^8.23.1",
+    "@types/smtp-server": "^3.5.13",
+    "mailparser": "^3.12.4",
+    "smtp-server": "^3.21.1",
+    "tsx": "^4.23.15",
+    "typescript": "~5.9.3",
+    "vitest": "^3.2.7"
+  },
+  "dependencies": {
+    "@electric-sql/pglite": "^0.5.13",
+    "nodemailer": "^10.3.0",
+    "pg": "^8.23.1"
+  }
+}

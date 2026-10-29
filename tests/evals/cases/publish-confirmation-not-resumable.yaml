@@ -1,0 +1,43 @@
+id: publish-confirmation-not-resumable
+title: 发布确认已通过时，「恢复执行」被拒绝而不是重跑报表
+path: 发布变化
+covers:
+  - FR-03.4 发布二次确认的完成入口只有「确认投递」
+  - 安全：发布确认不能被当作取数审批重放
+workspace: group-finance
+skill: monthly-operation-report
+request: 出 2025-09 的经营月报并发给管理层
+input:
+  period: "2025-09"
+
+flow:
+  - action: run
+  - action: request-publish
+    id: publishA
+    recipients:
+      - board@example.com
+    channel: email
+  - action: decide
+    approval: publishA
+    decision: granted
+    approver: 财务总监
+    reason: 数字已核对
+  # 批准之后错误地走了「恢复执行」。
+  # 发布确认的执行者是 confirmPublish；重放会让取数循环把报表再算一遍，
+  # 报表已发布、会话却回到 READY —— 这个样本钉死这条路径。
+  - action: resume
+
+expect:
+  state: WAITING_APPROVAL
+  errorCode: null
+  actionError: PUBLISH_CONFIRMATION_PENDING
+  events:
+    - report.drafted
+    - publish.confirmation.requested
+    - approval.granted
+  metricsPresent:
+    - revenue
+  resultCount: 6
+  # 没有被投递：仍停在草稿态
+  reportStatus: draft
+  approvalCount: 1

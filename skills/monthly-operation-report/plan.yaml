@@ -1,0 +1,76 @@
+# 经营月报的确定性执行计划（Mock 模型的输入）。
+#
+# 这份计划是 M1 默认 Agent 后端（MockAgentBackend）的「剧本」。它按顺序逐步执行，
+# 参数从 input 与前序步骤结果插值而来：
+#
+#   {{ input.period }}                                  —— 取 Session 的结构化输入
+#   {{ steps.businessUnits.data.businessUnits | pluck:code }} —— 取前一步结果里的字段数组
+#
+# 整串就是一个 {{ }} 时保留原始类型（数组仍是数组），混在文本里则做字符串插值。
+#
+# 换成真实 LLM 时这份文件不再被读取，但 Harness 的判定、Schema、状态机、
+# 事件轨迹完全不变——这正是它的价值：先把边界测准，再换脑子。
+
+steps:
+  - id: guideErp
+    tool: datasentry__read_source_guide
+    args:
+      sourceSlug: erp
+    description: 读取 ERP guide
+
+  - id: guideFinance
+    tool: datasentry__read_source_guide
+    args:
+      sourceSlug: finance
+    description: 读取财务 guide
+
+  - id: guideWarehouse
+    tool: datasentry__read_source_guide
+    args:
+      sourceSlug: warehouse
+    description: 读取数仓 guide
+
+  - id: guideExcel
+    tool: datasentry__read_source_guide
+    args:
+      sourceSlug: excel
+    description: 读取手工调整表 guide
+
+  # 发布 guide 不在这里读：发布由人工流程触发（发起确认 → 审批 → 确认投递），
+  # 不是 Agent 的取数动作。publish 工具因此不要求 guide 已读。
+
+  - id: businessUnits
+    tool: erp.list_business_units
+    description: 确定统计范围的事业部
+
+  - id: revenue
+    tool: erp.fetch_revenue
+    args:
+      period: "{{ input.period }}"
+      buCodes: "{{ steps.businessUnits.data.businessUnits | pluck:code }}"
+    description: 取主营收入
+
+  - id: cost
+    tool: erp.fetch_cost
+    args:
+      period: "{{ input.period }}"
+      buCodes: "{{ steps.businessUnits.data.businessUnits | pluck:code }}"
+    description: 取主营成本
+
+  - id: budget
+    tool: finance.fetch_budget
+    args:
+      period: "{{ input.period }}"
+    description: 取预算
+
+  - id: warehouseAggregate
+    tool: warehouse.query_monthly_aggregate
+    args:
+      period: "{{ input.period }}"
+    description: 取数仓聚合，用于交叉核对
+
+  - id: adjustments
+    tool: excel.fetch_manual_adjustments
+    args:
+      period: "{{ input.period }}"
+    description: 取手工调整项

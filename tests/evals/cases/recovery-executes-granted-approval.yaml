@@ -1,0 +1,61 @@
+id: recovery-executes-granted-approval
+title: 重启后一条 recover --execute 把已批准的任务跑完
+path: 重启恢复
+covers:
+  - FR-04 验收标准：服务重启后能从最后检查点恢复
+  - 恢复结论 resume-approved → 实际执行
+workspace: group-finance
+skill: monthly-operation-report
+request: 出 2025-09 的经营月报，并核对费用明细
+input:
+  period: "2025-09"
+
+steps:
+  - { id: guideErp, tool: datasentry__read_source_guide, args: { sourceSlug: erp } }
+  - { id: guideFinance, tool: datasentry__read_source_guide, args: { sourceSlug: finance } }
+  - { id: guideWarehouse, tool: datasentry__read_source_guide, args: { sourceSlug: warehouse } }
+  - { id: guideExcel, tool: datasentry__read_source_guide, args: { sourceSlug: excel } }
+  - { id: guidePublish, tool: datasentry__read_source_guide, args: { sourceSlug: publish } }
+  - { id: businessUnits, tool: erp.list_business_units, args: {} }
+  - id: revenue
+    tool: erp.fetch_revenue
+    args:
+      period: "{{ input.period }}"
+      buCodes: "{{ steps.businessUnits.data.businessUnits | pluck:code }}"
+  - id: cost
+    tool: erp.fetch_cost
+    args:
+      period: "{{ input.period }}"
+      buCodes: "{{ steps.businessUnits.data.businessUnits | pluck:code }}"
+  - { id: budget, tool: finance.fetch_budget, args: { period: "{{ input.period }}" } }
+  - { id: warehouseAggregate, tool: warehouse.query_monthly_aggregate, args: { period: "{{ input.period }}" } }
+  - { id: adjustments, tool: excel.fetch_manual_adjustments, args: { period: "{{ input.period }}" } }
+  - { id: expenseDetail, tool: finance.fetch_expense_detail, args: { period: "{{ input.period }}" } }
+
+flow:
+  - action: run
+  - action: restart
+  - action: decide
+    approval: pending
+    decision: granted
+    approver: 财务经理
+  # 一次调用同时完成「收敛」与「继续执行」
+  - action: recover
+    execute: true
+
+expect:
+  state: READY
+  errorCode: null
+  actionError: null
+  events:
+    - approval.granted
+    - planning.completed
+    - metric.computed
+    - report.drafted
+    - session.completed
+  metricsPresent:
+    - revenue
+    - grossProfit
+  resultCount: 7
+  reportStatus: draft
+  noDuplicateToolCalls: true

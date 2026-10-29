@@ -1,0 +1,117 @@
+{
+  "slug": "finance",
+  "title": "财务系统数据源",
+  "description": "模拟财务系统，提供预算与费用明细。费用明细可定位到报销人与单笔金额，属敏感数据。",
+  "type": "mcp-stdio",
+  "auth": {
+    "type": "static-token",
+    "credentialKey": "finance.token"
+  },
+  "transport": {
+    "command": "node",
+    "args": ["--import", "tsx", "${REPO_ROOT}/packages/mcp-sources/src/mcp-server.ts"],
+    "env": {
+      "SOURCE_SLUG": "finance"
+    }
+  },
+  "guide": "guide.md",
+  "tools": [
+    {
+      "name": "fetch_budget",
+      "title": "查询预算",
+      "description": "按会计期间查询收入预算与费用预算，用于计算预算差异。非敏感，可直接调用。",
+      "sensitivity": "internal",
+      "sideEffect": "read",
+      "requiresGuide": true,
+      "paramsSchema": {
+        "type": "object",
+        "properties": {
+          "period": { "type": "string", "pattern": "^[0-9]{4}-(0[1-9]|1[0-2])$" }
+        },
+        "required": ["period"],
+        "additionalProperties": false
+      },
+      "resultSchema": {
+        "type": "object",
+        "properties": {
+          "period": { "type": "string" },
+          "rows": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "buCode": { "type": "string" },
+                "buName": { "type": "string" },
+                "budgetRevenue": { "type": "number", "minimum": 0 },
+                "budgetExpense": { "type": "number", "minimum": 0 }
+              },
+              "required": ["buCode", "buName", "budgetRevenue", "budgetExpense"],
+              "additionalProperties": false
+            }
+          },
+          "totalBudgetRevenue": { "type": "number", "minimum": 0 }
+        },
+        "required": ["period", "rows", "totalBudgetRevenue"],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "fetch_expense_detail",
+      "title": "查询费用明细",
+      "description": "按期间查询逐笔费用明细，含报销人、金额与审批单号。属机密数据，需要审批后方可读取。",
+      "sensitivity": "confidential",
+      "sideEffect": "read",
+      "requiresGuide": true,
+      "paramsSchema": {
+        "type": "object",
+        "properties": {
+          "period": { "type": "string", "pattern": "^[0-9]{4}-(0[1-9]|1[0-2])$" },
+          "buCodes": {
+            "type": "array",
+            "items": { "type": "string", "pattern": "^BU-[A-Z]+$" },
+            "minItems": 1
+          },
+          "category": { "type": "string", "minLength": 1 }
+        },
+        "required": ["period"],
+        "additionalProperties": false
+      },
+      "resultSchema": {
+        "type": "object",
+        "properties": {
+          "period": { "type": "string" },
+          "rows": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "expenseId": { "type": "string" },
+                "buCode": { "type": "string" },
+                "buName": { "type": "string" },
+                "category": { "type": "string" },
+                "claimant": { "type": "string" },
+                "amount": { "type": "number" },
+                "voucherNo": { "type": "string" },
+                "incurredOn": { "type": "string" }
+              },
+              "required": [
+                "expenseId",
+                "buCode",
+                "buName",
+                "category",
+                "claimant",
+                "amount",
+                "voucherNo",
+                "incurredOn"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "totalExpense": { "type": "number" }
+        },
+        "required": ["period", "rows", "totalExpense"],
+        "additionalProperties": false
+      }
+    }
+  ]
+}

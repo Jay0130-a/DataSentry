@@ -1,0 +1,46 @@
+id: normal-monthly-report
+title: 正常经营月报全链路
+path: 正常
+covers:
+  - FR-01 三个数据源接入并生成工具
+  - FR-02 经营月报 Skill 依赖 ERP/财务/数仓/Excel
+  - FR-05 固定样本回归
+workspace: group-finance
+skill: monthly-operation-report
+request: 出 2025-09 的经营月报
+input:
+  period: "2025-09"
+
+# 不写 steps —— 使用 Skill 自带的 plan.yaml
+
+expect:
+  state: READY
+  errorCode: null
+  stoppedAtTool: null
+  events:
+    - session.created
+    - session.state.changed
+    - skill.loaded
+    - source.activated
+    - guide.read
+    - tool.call.requested
+    - permission.decided
+    - tool.call.completed
+    - planning.completed
+    - metric.computed
+    - report.drafted
+    - session.completed
+  metricsPresent:
+    - revenue
+    - cost
+    - grossProfit
+    - grossMargin
+    - budgetVariance
+    - manualAdjustment
+    - adjustedRevenue
+    - orderCount
+  resultCount: 6
+  reportStatus: draft
+  # 全程无需审批：月报取的是内部级别的汇总数据
+  approvalCount: 0
+  actionError: null

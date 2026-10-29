@@ -1,0 +1,36 @@
+id: schema-invalid-rejected
+title: 参数不符合契约在执行前被拒
+path: Schema 不兼容
+covers:
+  - FR-01 验收标准：Schema 非法的调用在执行前被拒绝
+  - FR-03.2 参数 Schema 检查
+workspace: group-finance
+skill: monthly-operation-report
+request: 出 2025 年 9 月的经营月报
+input:
+  period: "2025/09" # 故意用错格式，绕开模板直接写死在参数里
+
+steps:
+  - id: guideErp
+    tool: datasentry__read_source_guide
+    args:
+      sourceSlug: erp
+
+  - id: revenue
+    tool: erp.fetch_revenue
+    args:
+      period: "2025/09" # 不符合 ^\d{4}-\d{2}$，也不符合 additionalProperties: false
+
+expect:
+  state: BLOCKED
+  errorCode: SCHEMA_INVALID
+  stoppedAtTool: mcp__erp__fetch_revenue
+  events:
+    - session.created
+    - skill.loaded
+    - guide.read
+    - tool.call.requested
+    - permission.decided
+    - tool.call.failed
+  metricsPresent: []
+  resultCount: 0

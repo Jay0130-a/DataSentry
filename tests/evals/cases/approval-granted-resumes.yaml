@@ -1,0 +1,71 @@
+id: approval-granted-resumes
+title: 审批通过后从原 ToolCall 继续
+path: 审批
+covers:
+  - FR-04.3 审批恢复必须恢复原 ToolCall 并校验参数摘要
+  - §11 验收测试清单：重启后恢复原 ToolCall，不重新规划
+  - FR-03.3 审批绑定 Workspace / Session / ToolCall / 工具版本 / 参数摘要 / 有效期
+workspace: group-finance
+skill: monthly-operation-report
+request: 出 2025-09 的经营月报，并核对费用明细
+input:
+  period: "2025-09"
+
+# 完整的月报取数链路 + 最后一步读取机密级费用明细（需要审批）。
+# 审批通过后，任务必须从费用明细这一步接着往下走完，而不是从头再跑一遍。
+steps:
+  - { id: guideErp, tool: datasentry__read_source_guide, args: { sourceSlug: erp } }
+  - { id: guideFinance, tool: datasentry__read_source_guide, args: { sourceSlug: finance } }
+  - { id: guideWarehouse, tool: datasentry__read_source_guide, args: { sourceSlug: warehouse } }
+  - { id: guideExcel, tool: datasentry__read_source_guide, args: { sourceSlug: excel } }
+  - { id: guidePublish, tool: datasentry__read_source_guide, args: { sourceSlug: publish } }
+  - { id: businessUnits, tool: erp.list_business_units, args: {} }
+  - id: revenue
+    tool: erp.fetch_revenue
+    args:
+      period: "{{ input.period }}"
+      buCodes: "{{ steps.businessUnits.data.businessUnits | pluck:code }}"
+  - id: cost
+    tool: erp.fetch_cost
+    args:
+      period: "{{ input.period }}"
+      buCodes: "{{ steps.businessUnits.data.businessUnits | pluck:code }}"
+  - { id: budget, tool: finance.fetch_budget, args: { period: "{{ input.period }}" } }
+  - { id: warehouseAggregate, tool: warehouse.query_monthly_aggregate, args: { period: "{{ input.period }}" } }
+  - { id: adjustments, tool: excel.fetch_manual_adjustments, args: { period: "{{ input.period }}" } }
+  # 需要审批的那一步
+  - { id: expenseDetail, tool: finance.fetch_expense_detail, args: { period: "{{ input.period }}" } }
+
+flow:
+  - action: run
+  - action: decide
+    approval: pending
+    decision: granted
+    approver: 财务经理
+    reason: 月报核对费用口径
+  - action: resume
+
+expect:
+  state: READY
+  errorCode: null
+  actionError: null
+  events:
+    - session.created
+    - skill.loaded
+    - guide.read
+    - tool.call.completed
+    - approval.requested
+    - approval.granted
+    - planning.completed
+    # 恢复之后仍然走完计算与出稿，说明是「接着跑」而不是「重新跑」
+    - metric.computed
+    - report.drafted
+    - session.completed
+  metricsPresent:
+    - revenue
+    - cost
+    - grossProfit
+  # 6 条常规取数 + 1 条审批后才拿到的费用明细
+  resultCount: 7
+  reportStatus: draft
+  approvalCount: 1

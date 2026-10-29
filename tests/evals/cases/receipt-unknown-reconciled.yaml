@@ -1,0 +1,55 @@
+id: receipt-unknown-reconciled
+title: 发布结果未知时先查回执，补齐记账而不重发
+path: 回执未知
+covers:
+  - FR-06.3 发布结果未知时先查询回执，已发送不重发，未确认转人工
+  - FR-06 验收标准：超时结果未知时不重复发布
+  - FR-05.1 回执未知路径
+workspace: group-finance
+skill: monthly-operation-report
+request: 出 2025-09 的经营月报并发给管理层
+input:
+  period: "2025-09"
+
+flow:
+  - action: run
+  - action: request-publish
+    id: publishA
+    recipients:
+      - board@example.com
+      - audit@example.com
+    channel: email
+  - action: decide
+    approval: publishA
+    decision: granted
+    approver: 财务总监
+  # 投递成功，拿到回执
+  - action: confirm-publish
+    approval: publishA
+  # 精确复现那个崩溃窗口：记账回退到投递之前，网关侧的回执原样保留。
+  # 正常代码路径走不到这里——DONE 不允许回到 WAITING_APPROVAL。
+  - action: simulate-interrupted-publish
+  # 恢复扫描 + 状态收敛。发布结果未知的收尾只读回执、只写本地记账，
+  # 不产生任何对外动作，因此不受 execute 开关控制。
+  - action: recover
+    execute: false
+
+expect:
+  state: DONE
+  errorCode: null
+  actionError: null
+  # 补记之后任务彻底结清，恢复扫描不再需要动它
+  recoveryAction: skip-terminal
+  events:
+    - publish.confirmation.requested
+    - approval.granted
+    - publish.executed
+    - receipt.received
+    # 补记的痕迹：明确写了「按回执补齐；未重发」
+    - publish.reconciled
+  metricsPresent:
+    - revenue
+  resultCount: 6
+  reportStatus: published
+  # 只有一条回执——这就是「已发送不重发」的观测点
+  receiptCount: 1

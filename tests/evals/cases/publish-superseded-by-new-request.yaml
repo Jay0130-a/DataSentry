@@ -1,0 +1,56 @@
+id: publish-superseded-by-new-request
+title: 新发布请求取代旧确认，旧确认不可再用
+path: 审批漂移
+covers:
+  - FR-06 验收标准：接收人变化后原确认失效
+  - FR-03.3 审批绑定的唯一性
+workspace: group-finance
+skill: monthly-operation-report
+request: 出 2025-09 的经营月报
+input:
+  period: "2025-09"
+
+flow:
+  - action: run
+
+  - action: request-publish
+    id: publishA
+    recipients:
+      - board@example.com
+      - audit@example.com
+    channel: email
+
+  # 先批准 A
+  - action: decide
+    approval: publishA
+    decision: granted
+    approver: 财务总监
+    reason: 按原名单发布
+
+  # 接收人变了，重新发起一次 —— 这一步会吊销 A
+  - action: request-publish
+    id: publishB
+    recipients:
+      - bu-managers@example.com
+    channel: email
+
+  # 再拿已作废的 A 去发布：必须被拒
+  - action: confirm-publish
+    approval: publishA
+
+expect:
+  # 任务仍在等待对 B 的确认，没有因为 A 被作废而卡死在别处
+  state: WAITING_APPROVAL
+  errorCode: null
+  actionError: APPROVAL_INVALID
+  events:
+    - report.drafted
+    - publish.confirmation.requested
+    - approval.granted
+    # A 被吊销、B 建立，两次请求都留下轨迹
+    - publish.confirmation.requested
+  metricsPresent:
+    - revenue
+  reportStatus: draft
+  # A 与 B 各一条
+  approvalCount: 2

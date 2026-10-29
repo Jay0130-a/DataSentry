@@ -1,0 +1,11 @@
+# 统一用 LF：CI 跑在 Linux 上，源码里出现 CRLF 会让 diff 和脚本都变脆。
+* text=auto eol=lf
+
+# 二进制文件不要做换行转换
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.xlsx binary
+*.ttf binary
+*.woff binary
+*.woff2 binary

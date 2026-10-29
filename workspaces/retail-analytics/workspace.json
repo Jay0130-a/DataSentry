@@ -1,0 +1,23 @@
+{
+  "id": "retail-analytics",
+  "name": "零售事业部经营分析",
+  "sources": ["erp"],
+  "skills": ["monthly-operation-report"],
+  "defaultPermissionMode": "safe",
+  "ruleVersion": "rules-2025.09",
+  "allowedRecipients": ["bu-managers@example.com"],
+  "metrics": {
+    "inputs": {
+      "revenue": { "tool": "erp.fetch_revenue", "field": "totalRevenue" },
+      "cost": { "tool": "erp.fetch_cost", "field": "totalCost" }
+    },
+    "required": ["revenue", "cost", "grossProfit"]
+  },
+  "approvalPolicy": {
+    "confidential": ["team-lead", "cfo"],
+    "publish": ["team-lead", "cfo"]
+  },
+  "segregationOfDuties": true,
+  "currency": "CNY",
+  "timezone": "Asia/Shanghai"
+}

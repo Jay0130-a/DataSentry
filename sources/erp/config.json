@@ -1,0 +1,140 @@
+{
+  "slug": "erp",
+  "title": "ERP 经营数据源",
+  "description": "模拟 ERP 系统，提供事业部主数据、主营收入与主营成本。只读。",
+  "type": "mcp-stdio",
+  "auth": {
+    "type": "static-token",
+    "credentialKey": "erp.token"
+  },
+  "transport": {
+    "command": "node",
+    "args": ["--import", "tsx", "${REPO_ROOT}/packages/mcp-sources/src/mcp-server.ts"],
+    "env": {
+      "SOURCE_SLUG": "erp"
+    }
+  },
+  "guide": "guide.md",
+  "tools": [
+    {
+      "name": "list_business_units",
+      "title": "查询事业部列表",
+      "description": "返回纳入经营报表的事业部主数据。取数前必须先调用它确定 buCodes，不要臆造事业部编码。",
+      "sensitivity": "internal",
+      "sideEffect": "read",
+      "requiresGuide": true,
+      "paramsSchema": {
+        "type": "object",
+        "properties": {},
+        "required": [],
+        "additionalProperties": false
+      },
+      "resultSchema": {
+        "type": "object",
+        "properties": {
+          "businessUnits": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "code": { "type": "string", "pattern": "^BU-[A-Z]+$" },
+                "name": { "type": "string" },
+                "region": { "type": "string" }
+              },
+              "required": ["code", "name", "region"],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": ["businessUnits"],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "fetch_revenue",
+      "title": "查询主营收入",
+      "description": "按会计期间查询主营收入，可按事业部过滤。金额单位为元。",
+      "sensitivity": "internal",
+      "sideEffect": "read",
+      "requiresGuide": true,
+      "paramsSchema": {
+        "type": "object",
+        "properties": {
+          "period": { "type": "string", "pattern": "^[0-9]{4}-(0[1-9]|1[0-2])$" },
+          "buCodes": {
+            "type": "array",
+            "items": { "type": "string", "pattern": "^BU-[A-Z]+$" },
+            "minItems": 1
+          }
+        },
+        "required": ["period"],
+        "additionalProperties": false
+      },
+      "resultSchema": {
+        "type": "object",
+        "properties": {
+          "period": { "type": "string" },
+          "rows": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "buCode": { "type": "string" },
+                "buName": { "type": "string" },
+                "revenue": { "type": "number", "minimum": 0 }
+              },
+              "required": ["buCode", "buName", "revenue"],
+              "additionalProperties": false
+            }
+          },
+          "totalRevenue": { "type": "number", "minimum": 0 }
+        },
+        "required": ["period", "rows", "totalRevenue"],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "fetch_cost",
+      "title": "查询主营成本",
+      "description": "按会计期间查询主营成本，口径与 fetch_revenue 的事业部维度一致，便于配比计算毛利。",
+      "sensitivity": "internal",
+      "sideEffect": "read",
+      "requiresGuide": true,
+      "paramsSchema": {
+        "type": "object",
+        "properties": {
+          "period": { "type": "string", "pattern": "^[0-9]{4}-(0[1-9]|1[0-2])$" },
+          "buCodes": {
+            "type": "array",
+            "items": { "type": "string", "pattern": "^BU-[A-Z]+$" },
+            "minItems": 1
+          }
+        },
+        "required": ["period"],
+        "additionalProperties": false
+      },
+      "resultSchema": {
+        "type": "object",
+        "properties": {
+          "period": { "type": "string" },
+          "rows": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "buCode": { "type": "string" },
+                "buName": { "type": "string" },
+                "cost": { "type": "number", "minimum": 0 }
+              },
+              "required": ["buCode", "buName", "cost"],
+              "additionalProperties": false
+            }
+          },
+          "totalCost": { "type": "number", "minimum": 0 }
+        },
+        "required": ["period", "rows", "totalCost"],
+        "additionalProperties": false
+      }
+    }
+  ]
+}

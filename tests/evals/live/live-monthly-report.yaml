@@ -1,0 +1,15 @@
+id: live-monthly-report
+title: 真实模型独立完成经营月报
+# 模型自由决定读哪些 guide、调哪些工具、按什么顺序。
+# 这里只断言：跑得完、每笔调用都有判定、数字和 Mock 基线对得上。
+workspace: group-finance
+request: 出 2025-09 的经营月报
+input:
+  period: "2025-09"
+
+expect:
+  states:
+    - READY
+  # 同一份数据、同一句话，换模型不该换数字。
+  compareBaseline: true
+  tolerance: 0.01

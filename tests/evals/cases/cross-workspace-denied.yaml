@@ -1,0 +1,32 @@
+id: cross-workspace-denied
+title: 跨 Workspace 访问 Source 被拒
+path: 拒绝
+covers:
+  - FR-03 验收标准：跨 Workspace Source DENY
+  - §11 验收测试清单：跨 Workspace Source 被拒绝
+workspace: retail-analytics # 该 Workspace 只授权了 erp
+skill: monthly-operation-report
+request: 出 2025-09 的经营月报
+input:
+  period: "2025-09"
+
+steps:
+  - id: warehouseAggregate
+    tool: warehouse.query_monthly_aggregate
+    args:
+      period: "{{ input.period }}"
+
+expect:
+  state: BLOCKED
+  errorCode: WORKSPACE_BOUNDARY_VIOLATION
+  stoppedAtTool: mcp__warehouse__query_monthly_aggregate
+  events:
+    - session.created
+    - skill.loaded
+    # Skill 依赖的四个 Source 里有三个不在本 Workspace 边界内
+    - validation.failed
+    - tool.call.requested
+    - permission.decided
+    - tool.call.failed
+  metricsPresent: []
+  resultCount: 0

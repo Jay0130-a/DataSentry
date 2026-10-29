@@ -1,0 +1,54 @@
+id: partial-results-flagged
+title: 只取到部分事业部时报表标注口径不完整
+path: 部分结果
+covers:
+  - FR-01.4 取数结果返回 completeness
+  - sources/erp/guide.md：completeness 为 partial 时不得当作完整口径直接出报表
+  - FR-05.1 部分结果路径
+workspace: group-finance
+skill: monthly-operation-report
+request: 只出华东事业部的月报
+input:
+  period: "2025-09"
+
+steps:
+  - { id: guideErp, tool: datasentry__read_source_guide, args: { sourceSlug: erp } }
+  - { id: guideFinance, tool: datasentry__read_source_guide, args: { sourceSlug: finance } }
+  - { id: guideExcel, tool: datasentry__read_source_guide, args: { sourceSlug: excel } }
+  # 只查一个事业部：Source 侧会把 completeness 标成 partial
+  - id: revenue
+    tool: erp.fetch_revenue
+    args:
+      period: "{{ input.period }}"
+      buCodes: ["BU-EAST"]
+  - id: cost
+    tool: erp.fetch_cost
+    args:
+      period: "{{ input.period }}"
+      buCodes: ["BU-EAST"]
+  - { id: budget, tool: finance.fetch_budget, args: { period: "{{ input.period }}" } }
+  - { id: adjustments, tool: excel.fetch_manual_adjustments, args: { period: "{{ input.period }}" } }
+
+# 刻意不查数仓：数仓的聚合口径是全量的，拿它跟「只要一个事业部」的 ERP 结果比，
+# 差异必然超阈值，会被正确地判成口径冲突转人工。那是另一条路径（见
+# sources/warehouse/guide.md 的差异处置），不是本样本要验的东西。
+
+expect:
+  # partial 不是硬失败——部分口径在真实业务里是常态，把它当失败会让系统没法用。
+  # 但它必须被显式标注，所以落到报表注脚里。
+  state: READY
+  errorCode: null
+  actionError: null
+  events:
+    - tool.call.completed
+    - metric.computed
+    - report.drafted
+  metricsPresent:
+    - revenue
+    - cost
+    - grossProfit
+  warningsContaining:
+    - 完整性为 partial
+  resultCount: 4
+  reportStatus: draft
+  noDuplicateToolCalls: true

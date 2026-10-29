@@ -1,0 +1,14 @@
+{
+  "name": "@datasentry/core",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "DataSentry 契约层：类型、Zod Schema、事件定义、状态机、错误码",
+  "exports": {
+    ".": "./src/index.ts",
+    "./*": "./src/*"
+  },
+  "dependencies": {
+    "zod": "^4.6.5"
+  }
+}

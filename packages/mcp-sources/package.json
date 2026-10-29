@@ -1,0 +1,18 @@
+{
+  "name": "@datasentry/mcp-sources",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "DataSentry 模拟数据源：MCP stdio 服务（ERP/财务）、数仓 HTTP 服务、种子数据生成",
+  "exports": {
+    ".": "./src/index.ts",
+    "./seed": "./src/seed.ts"
+  },
+  "dependencies": {
+    "@datasentry/core": "*",
+    "@modelcontextprotocol/sdk": "^1.32.1",
+    "better-sqlite3": "^13.0.3",
+    "exceljs": "^4.4.0",
+    "fastify": "^5.12.5"
+  }
+}

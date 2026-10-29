@@ -1,0 +1,175 @@
+{
+  "slug": "publish",
+  "title": "报表发布网关",
+  "description": "把已确认的报表草稿投递到接收人。发布是对外动作且不可撤销，必须人工二次确认。",
+  "type": "local",
+  "auth": {
+    "type": "none"
+  },
+  "transport": {
+    "module": "publish-gateway",
+    "options": {
+      "file": "${DATA_DIR}/published/receipts.jsonl"
+    }
+  },
+  "guide": "guide.md",
+  "tools": [
+    {
+      "name": "publish_report",
+      "title": "发布报表",
+      "description": "将指定草稿按指定格式（Excel/Word/PDF/Markdown）发布给接收人。网关保证幂等：同一草稿版本、同一格式发给同一批接收人只会投递一次。",
+      "sensitivity": "internal",
+      "sideEffect": "publish",
+      "requiresGuide": false,
+      "paramsSchema": {
+        "type": "object",
+        "properties": {
+          "reportId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "draftVersion": {
+            "type": "string",
+            "minLength": 1
+          },
+          "recipients": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 3
+            },
+            "minItems": 1
+          },
+          "channel": {
+            "type": "string",
+            "enum": [
+              "email",
+              "im",
+              "portal"
+            ]
+          },
+          "format": {
+            "type": "string",
+            "enum": [
+              "xlsx",
+              "docx",
+              "pdf",
+              "md"
+            ]
+          },
+          "fileName": {
+            "type": "string",
+            "minLength": 1
+          },
+          "artifactPath": {
+            "type": "string",
+            "minLength": 1
+          },
+          "sha256": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "sizeBytes": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "mimeType": {
+            "type": "string",
+            "minLength": 1
+          },
+          "period": {
+            "type": "string"
+          },
+          "workspaceName": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "reportId",
+          "draftVersion",
+          "recipients",
+          "channel",
+          "format",
+          "fileName",
+          "artifactPath",
+          "sha256",
+          "sizeBytes",
+          "mimeType"
+        ],
+        "additionalProperties": false
+      },
+      "resultSchema": {
+        "type": "object",
+        "properties": {
+          "receiptId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "reportId": {
+            "type": "string"
+          },
+          "draftVersion": {
+            "type": "string"
+          },
+          "recipients": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "channel": {
+            "type": "string"
+          },
+          "format": {
+            "type": "string"
+          },
+          "fileName": {
+            "type": "string"
+          },
+          "sha256": {
+            "type": "string"
+          },
+          "sizeBytes": {
+            "type": "integer"
+          },
+          "mimeType": {
+            "type": "string"
+          },
+          "deliveredPath": {
+            "type": "string"
+          },
+          "transport": {
+            "type": "string",
+            "enum": ["smtp", "stream", "simulated"]
+          },
+          "messageId": {
+            "type": "string"
+          },
+          "publishedAt": {
+            "type": "string"
+          },
+          "deduplicated": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "receiptId",
+          "reportId",
+          "draftVersion",
+          "recipients",
+          "channel",
+          "format",
+          "fileName",
+          "sha256",
+          "sizeBytes",
+          "mimeType",
+          "deliveredPath",
+          "transport",
+          "publishedAt",
+          "deduplicated"
+        ],
+        "additionalProperties": false
+      }
+    }
+  ]
+}

@@ -1,0 +1,28 @@
+id: natural-language-request
+title: 只写一句自然语言需求即可发起并跑完
+path: 正常
+covers:
+  - §2.2 通过自然语言发起报表
+  - FR-05 固定样本回归
+workspace: group-finance
+skill: monthly-operation-report
+request: 出 2025 年 9 月的经营月报
+# 不传结构化输入：期间必须从这句需求里识别出来。
+# 识别不到会以 REQUEST_PERIOD_MISSING 失败，而不是默默默认一个月份。
+input: {}
+
+expect:
+  state: READY
+  errorCode: null
+  actionError: null
+  events:
+    - session.created
+    - planning.completed
+    - metric.computed
+    - report.drafted
+  metricsPresent:
+    - revenue
+    - grossProfit
+  resultCount: 6
+  reportStatus: draft
+  noDuplicateToolCalls: true

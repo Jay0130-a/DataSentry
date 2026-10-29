@@ -1,0 +1,49 @@
+id: approval-params-drift-rejected
+title: 审批期间参数被改动，摘要与参数不一致即拒绝
+# 只适用于 legacy 循环：它的 flow 是「run 停下来 → 篡改 → 恢复」。
+# pi 的审批是「hook 内 await」，run 不会返回、进程活着时参数一直在内存里，
+# 同样的攻击只有在杀掉进程后才成立——那条路径由 *-after-restart 样本覆盖。
+runners:
+  - legacy
+path: 审批漂移
+covers:
+  - FR-03.3 审批绑定参数摘要——参数一变审批就失效
+  - FR-04.3 审批恢复必须校验参数摘要
+  - 安全：摘要必须由参数现算，不能是另一份可独立改动的数据
+workspace: group-finance
+skill: monthly-operation-report
+request: 出 2025-09 的费用明细
+input:
+  period: "2025-09"
+
+steps:
+  - { id: guideFinance, tool: datasentry__read_source_guide, args: { sourceSlug: finance } }
+  - { id: expenseDetail, tool: finance.fetch_expense_detail, args: { period: "{{ input.period }}" } }
+
+flow:
+  - action: run
+  # 审批批的是 2025-09，这里把参数偷偷改成 2025-08，**不动**参数摘要字段。
+  # 这是审批绑定最刁钻的绕过方式：绑定比对的是摘要字段，执行用的是参数。
+  - action: tamper-params
+  - action: decide
+    approval: pending
+    decision: granted
+    approver: 财务经理
+  - action: resume
+
+expect:
+  state: BLOCKED
+  errorCode: APPROVAL_PARAMS_DRIFT
+  actionError: null
+  events:
+    - approval.requested
+    - approval.granted
+    # 恢复后重放原 ToolCall，参数与摘要对不上 → 在权限链之前就被拦下
+    - tool.call.requested
+    - tool.call.failed
+    - session.state.changed
+  metricsPresent: []
+  # 被驳回的调用没有产出任何结果
+  resultCount: 0
+  reportStatus: null
+  approvalCount: 1

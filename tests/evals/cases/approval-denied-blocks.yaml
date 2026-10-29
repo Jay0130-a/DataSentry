@@ -1,0 +1,41 @@
+id: approval-denied-blocks
+title: 审批被拒后任务停止而不是换参数重试
+path: 拒绝
+covers:
+  - FR-03.3 审批绑定与拒绝语义
+  - FR-04.1 状态机异常分支 BLOCKED
+  - sources/finance/guide.md：审批被拒后不得绕过
+workspace: group-finance
+skill: monthly-operation-report
+request: 出 2025-09 的费用明细
+input:
+  period: "2025-09"
+
+steps:
+  - { id: guideFinance, tool: datasentry__read_source_guide, args: { sourceSlug: finance } }
+  - { id: expenseDetail, tool: finance.fetch_expense_detail, args: { period: "{{ input.period }}" } }
+  # 拒绝之后计划里还有一步：如果实现里让 Agent 继续往下走，这条就会露馅
+  - { id: budget, tool: finance.fetch_budget, args: { period: "{{ input.period }}" } }
+
+flow:
+  - action: run
+  - action: decide
+    approval: pending
+    decision: denied
+    approver: 财务经理
+    reason: 该需求未说明用途，不批准读取费用明细
+
+expect:
+  state: BLOCKED
+  errorCode: APPROVAL_DENIED
+  actionError: null
+  events:
+    - tool.call.requested
+    - approval.requested
+    - approval.denied
+    - tool.call.failed
+    - session.state.changed
+  metricsPresent: []
+  resultCount: 0
+  reportStatus: null
+  approvalCount: 1

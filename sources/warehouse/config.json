@@ -1,0 +1,66 @@
+{
+  "slug": "warehouse",
+  "title": "经营数仓数据源",
+  "description": "模拟 SQLite 数仓，提供已聚合的月度经营指标与订单量。用于与 ERP 明细交叉核对口径。",
+  "type": "http",
+  "auth": {
+    "type": "none"
+  },
+  "transport": {
+    "toolPath": "/tools/{tool}",
+    "timeoutMs": 10000,
+    "managed": {
+      "module": "warehouse-http"
+    }
+  },
+  "guide": "guide.md",
+  "tools": [
+    {
+      "name": "query_monthly_aggregate",
+      "title": "查询月度经营聚合",
+      "description": "从数仓读取按事业部聚合的月度收入、成本与订单量。数据已经过 ETL，与 ERP 明细可能存在口径差异。",
+      "sensitivity": "internal",
+      "sideEffect": "read",
+      "requiresGuide": true,
+      "paramsSchema": {
+        "type": "object",
+        "properties": {
+          "period": { "type": "string", "pattern": "^[0-9]{4}-(0[1-9]|1[0-2])$" },
+          "driftRatio": {
+            "type": "number",
+            "minimum": -0.5,
+            "maximum": 0.5
+          }
+        },
+        "required": ["period"],
+        "additionalProperties": false
+      },
+      "resultSchema": {
+        "type": "object",
+        "properties": {
+          "period": { "type": "string" },
+          "rows": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "buCode": { "type": "string" },
+                "buName": { "type": "string" },
+                "revenue": { "type": "number", "minimum": 0 },
+                "cost": { "type": "number", "minimum": 0 },
+                "orderCount": { "type": "integer", "minimum": 0 }
+              },
+              "required": ["buCode", "buName", "revenue", "cost", "orderCount"],
+              "additionalProperties": false
+            }
+          },
+          "totalRevenue": { "type": "number", "minimum": 0 },
+          "totalCost": { "type": "number", "minimum": 0 },
+          "totalOrders": { "type": "integer", "minimum": 0 }
+        },
+        "required": ["period", "rows", "totalRevenue", "totalCost", "totalOrders"],
+        "additionalProperties": false
+      }
+    }
+  ]
+}

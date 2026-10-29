@@ -1,0 +1,48 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  # 类型、单测、两套循环的回归、前端构建。
+  # 全部离线：模型锁 mock、邮件走 stream 模式，不需要任何密钥。
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+
+      - run: npm ci
+
+      - name: 类型检查（后端）
+        run: npm run typecheck
+
+      - name: 类型检查（前端）
+        run: npm run typecheck:web
+
+      - name: 单元与集成测试
+        run: npm run test
+
+      - name: 回归（legacy 循环）
+        run: npm run eval
+
+      - name: 回归（pi 循环）
+        run: DATASENTRY_AGENT_LOOP=pi npm run eval
+
+      - name: 前端构建
+        run: npm run build:web
+
+  # 镜像能构建出来，才算「一条命令跑起来」这句话成立。
+  image:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 构建镜像
+        run: docker build -t datasentry:ci .

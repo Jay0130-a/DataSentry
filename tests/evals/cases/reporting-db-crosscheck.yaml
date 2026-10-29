@@ -1,0 +1,36 @@
+id: reporting-db-crosscheck
+title: 真实 Postgres 数据源参与经营月报交叉核对
+path: 正常
+covers:
+  - FR-01 第四种接入方式：postgres（参数化命名查询）
+  - FR-02 报表库与 ERP 同期间、同事业部口径比对
+workspace: group-finance
+skill: monthly-crosscheck
+request: 出 2025-09 的经营月报，并与报表库核对
+input:
+  period: "2025-09"
+
+# 不写 steps —— 使用 Skill 自带的 plan.yaml
+# 这个样本需要预置真实数据源：在它自己的临时目录里建 PGlite 并写入种子数据。
+seed:
+  - reporting-db
+
+expect:
+  state: READY
+  errorCode: null
+  stoppedAtTool: null
+  events:
+    - session.created
+    - guide.read
+    - tool.call.completed
+    - metric.computed
+    - report.drafted
+  metricsPresent:
+    - revenue
+    - cost
+    - grossProfit
+  # 主数据 + ERP 收入/成本 + 报表库收入/成本
+  resultCount: 5
+  reportStatus: draft
+  approvalCount: 0
+  noDuplicateToolCalls: true

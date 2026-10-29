@@ -1,0 +1,26 @@
+node_modules/
+dist/
+build/
+
+# 运行期数据：状态库、事件轨迹、报表产物、模拟源种子数据（由 npm run seed 生成）
+data/
+
+# 凭据绝不入库
+data/credentials.json
+credentials.json
+.env
+.env.*
+# 模板要进版本库放上面两条规则之后
+!.env.example
+
+# 回归报告
+reports/
+*.log
+npm-debug.log*
+
+# 编辑器 / 系统
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+*.tsbuildinfo
