@@ -182,6 +182,7 @@ export class PublishService {
     const precheck = precheckPublish({
       report,
       allowedRecipients: workspace.allowedRecipients,
+      imTargets: Object.keys(workspace.imTargets ?? {}),
       request,
       warnings: Array.isArray(report.meta['warnings'])
         ? (report.meta['warnings'] as string[])
@@ -233,6 +234,15 @@ export class PublishService {
       // 邮件标题与正文要用：网关据此组装，不必再回查 Session。
       period: String(session.input['period'] ?? ''),
       workspaceName: workspace.name,
+      // IM 渠道：传目标名与「凭据变量名」，不传密钥本身——
+      // args 会进 tool_call 表与事件轨迹，密钥不能出现在那里。
+      ...(request.channel === 'im'
+        ? {
+            imTarget: precheck.recipients[0] ?? '',
+            imCredentialKey:
+              workspace.imTargets?.[precheck.recipients[0] ?? '']?.credentialKey ?? '',
+          }
+        : {}),
     }
     const toolName = PUBLISH_TOOL_NAME
     const toolVersion = this.deps.toolVersionOf(toolName)

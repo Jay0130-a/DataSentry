@@ -143,7 +143,10 @@ export class SourceServerBuilder {
       }
 
       case 'local':
-        return createLocalTransport(source, { paths: this.paths })
+        return createLocalTransport(source, {
+          paths: this.paths,
+          credentials: this.credentials,
+        })
 
       case 'postgres':
         return createPostgresTransport(source, { paths: this.paths })

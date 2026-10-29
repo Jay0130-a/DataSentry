@@ -24,7 +24,8 @@
     "mail": "tsx scripts/smtp-sink.ts",
     "dev:web": "npm --workspace @datasentry/web run dev",
     "build:web": "npm --workspace @datasentry/web run build",
-    "cli": "tsx packages/backend/src/cli.ts"
+    "cli": "tsx packages/backend/src/cli.ts",
+    "im": "tsx scripts/wecom-sink.ts"
   },
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.13",

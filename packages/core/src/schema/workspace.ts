@@ -42,6 +42,15 @@ export const workspaceSchema = z.object({
    */
   allowedRecipients: z.array(z.string().min(1)).default([]),
   /**
+   * IM 投递目标：群标识 → 凭据变量名。
+   *
+   * 群机器人只能发到它所属的那一个群，所以 IM 发布一次只允许一个目标。
+   * 这里存的是**变量名**，webhook key 本身在 credentials.json / 环境变量里。
+   */
+  imTargets: z
+    .record(z.string(), z.object({ credentialKey: z.string().min(1) }))
+    .default({}),
+  /**
    * 审批资格：哪类审批需要哪些角色。
    *
    * 键是审批类别，值是「有资格批准的角色名」。用户的角色来自 `user.approver_roles`。

@@ -46,7 +46,10 @@ export interface PublishRequest {
 
 export interface PublishPrecheckInput {
   report: Report
+  /** 邮件 / 门户渠道的接收人名单。 */
   allowedRecipients: readonly string[]
+  /** IM 渠道允许的群目标名；IM 用这一份，不用邮箱名单。 */
+  imTargets?: readonly string[]
   request: PublishRequest
   /** 草稿产物里记录的告警，一并带进校验结论。 */
   warnings?: readonly string[]
@@ -113,13 +116,23 @@ export function precheckPublish(input: PublishPrecheckInput): PublishPrecheck {
   }
 
   // 接收人范围：不在授权名单里的一个都不放过。
-  const allowed = new Set(input.allowedRecipients.map((r) => r.trim().toLowerCase()))
+  // IM 与邮件的「接收人」不是同一类东西——群机器人只能发到它所属的那个群。
+  const isIm = input.request.channel === 'im'
+  const allowList = isIm ? (input.imTargets ?? []) : input.allowedRecipients
+  const allowed = new Set(allowList.map((r) => r.trim().toLowerCase()))
   const unauthorized = recipients.filter((r) => !allowed.has(r))
   if (unauthorized.length > 0) {
     failures.push(
-      `以下接收人不在当前 Workspace 的分发名单内：${unauthorized.join(', ')}` +
-        (allowed.size > 0 ? `（允许：${[...allowed].sort().join(', ')}）` : '（名单为空，禁止对外发布）'),
+      `以下${isIm ? '目标' : '接收人'}不在当前 Workspace 的${isIm ? ' IM 目标' : '分发名单'}内：${unauthorized.join(', ')}` +
+        (allowed.size > 0
+          ? `（允许：${[...allowed].sort().join(', ')}）`
+          : `（${isIm ? '未配置 IM 目标' : '名单为空'}，禁止对外发布）`),
     )
+  }
+
+  // 一个群机器人只属于一个群：一次发布只能指定一个目标，否则没法说清到底发到了哪。
+  if (isIm && recipients.length > 1) {
+    failures.push(`IM 渠道一次只能指定一个群目标（收到 ${recipients.length} 个：${recipients.join(', ')}）`)
   }
 
   // 有口径冲突的报表不能发布——数仓和 ERP 对不上的数字发给董事会是要出事的。

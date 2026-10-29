@@ -386,3 +386,71 @@ describe('审批有效期', () => {
     void report
   })
 })
+
+describe('IM 接收人校验', () => {
+  // 只关心接收人这一项，其余字段给能过校验的最小值
+  const report = {
+    id: 'rpt_im',
+    sessionId: 'sess_im',
+    workspaceId: 'group-finance',
+    draftVersion: 'v1-test',
+    status: 'draft',
+    ruleVersion: 'r1',
+    metrics: [],
+    conflicts: [],
+    resultRefs: [],
+    dataVersions: { erp: 'v1' },
+    recipientsHash: null,
+    receiptId: null,
+    artifactPath: null,
+    meta: {},
+    createdAt: '2026-01-01T00:00:00.000Z',
+    updatedAt: '2026-01-01T00:00:00.000Z',
+  } as unknown as Report
+
+  it('IM 渠道用群目标名单，不用邮箱名单', () => {
+    const outcome = precheckPublish({
+      report,
+      allowedRecipients: ['board@example.com'],
+      imTargets: ['board-room'],
+      request: { recipients: ['board-room'], channel: 'im', format: 'xlsx' },
+    })
+
+    expect(outcome.ok, outcome.failures.join()).toBe(true)
+  })
+
+  it('把邮箱地址当群目标会被拒', () => {
+    const outcome = precheckPublish({
+      report,
+      allowedRecipients: ['board@example.com'],
+      imTargets: ['board-room'],
+      request: { recipients: ['board@example.com'], channel: 'im', format: 'xlsx' },
+    })
+
+    expect(outcome.ok).toBe(false)
+    expect(outcome.failures.join()).toContain('IM 目标')
+  })
+
+  it('一次只能指定一个群目标', () => {
+    const outcome = precheckPublish({
+      report,
+      allowedRecipients: [],
+      imTargets: ['room-a', 'room-b'],
+      request: { recipients: ['room-a', 'room-b'], channel: 'im', format: 'xlsx' },
+    })
+
+    expect(outcome.ok).toBe(false)
+    expect(outcome.failures.join()).toContain('只能指定一个群目标')
+  })
+
+  it('没配 IM 目标时禁止 IM 发布', () => {
+    const outcome = precheckPublish({
+      report,
+      allowedRecipients: ['board@example.com'],
+      request: { recipients: ['board-room'], channel: 'im', format: 'xlsx' },
+    })
+
+    expect(outcome.ok).toBe(false)
+    expect(outcome.failures.join()).toContain('未配置 IM 目标')
+  })
+})

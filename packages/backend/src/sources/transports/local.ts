@@ -1,10 +1,16 @@
 import type { DataPaths, SourceConfig, ToolExecution } from '@datasentry/core'
+import type { CredentialManager } from '../../credentials/manager.ts'
 import type { LoadedSource } from '../loader.ts'
 import { ToolExecutionError, type SourceTransport } from './types.ts'
 
 export interface LocalHandlerContext {
   options: Record<string, unknown>
   paths: DataPaths
+  /**
+   * 凭据管理器。handler 需要密钥时用它按**变量名**取，
+   * 密钥本身绝不进 args、事件或日志。
+   */
+  credentials?: CredentialManager
 }
 
 export type LocalToolHandler = (
@@ -33,7 +39,7 @@ export function registeredLocalModules(): string[] {
  */
 export function createLocalTransport(
   source: LoadedSource,
-  deps: { paths: DataPaths },
+  deps: { paths: DataPaths; credentials?: CredentialManager },
 ): SourceTransport {
   const config = source.config as Extract<SourceConfig, { type: 'local' }>
   const module = config.transport.module
@@ -57,7 +63,11 @@ export function createLocalTransport(
     )
   }
 
-  const ctx: LocalHandlerContext = { options: config.transport.options, paths: deps.paths }
+  const ctx: LocalHandlerContext = {
+    options: config.transport.options,
+    paths: deps.paths,
+    ...(deps.credentials ? { credentials: deps.credentials } : {}),
+  }
 
   return {
     slug: config.slug,

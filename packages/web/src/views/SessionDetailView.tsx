@@ -17,6 +17,7 @@ export function SessionDetailView({ sessionId }: { sessionId: string }): React.J
   const events = useAsync(() => api.getSessionEvents(sessionId), [sessionId])
   const report = useAsync(() => api.getSessionReport(sessionId), [sessionId])
   const approvals = useAsync(() => api.getSessionApprovals(sessionId), [sessionId])
+  const workspaces = useAsync(() => api.listWorkspaces(), [])
 
   const [pendingAction, setPendingAction] = useState<string | null>(null)
   const [actionError, setActionError] = useState<string | null>(null)
@@ -115,6 +116,8 @@ export function SessionDetailView({ sessionId }: { sessionId: string }): React.J
   }
 
   const session: SessionDetail | null = detail.data
+  const imTargets =
+    workspaces.data?.find((item) => item.id === session?.workspaceId)?.imTargets ?? []
   const pendingApprovals = (approvals.data ?? []).filter((a) => a.status === 'pending')
   const latestApproval = (approvals.data ?? []).at(-1) ?? null
   // 发布确认的执行入口是「确认投递」，不是恢复执行：
@@ -306,9 +309,12 @@ export function SessionDetailView({ sessionId }: { sessionId: string }): React.J
                 <select
                   className="input"
                   value={channel}
-                  onChange={(event) =>
-                    setChannel(event.target.value as 'email' | 'im' | 'portal')
-                  }
+                  onChange={(event) => {
+                    const next = event.target.value as 'email' | 'im' | 'portal'
+                    setChannel(next)
+                    // 切到 IM 时把默认目标填上，省得用户猜目标名
+                    if (next === 'im' && imTargets.length > 0) setRecipients(imTargets[0]!)
+                  }}
                   disabled={publishBusy}
                 >
                   <option value="email">email</option>
@@ -320,7 +326,11 @@ export function SessionDetailView({ sessionId }: { sessionId: string }): React.J
 
             <input
               className="input"
-              placeholder="接收人，逗号分隔（须在 Workspace 分发名单内）"
+              placeholder={
+                channel === 'im'
+                  ? 'IM 群目标（一次一个），例如 board-room'
+                  : '接收人，逗号分隔（须在 Workspace 分发名单内）'
+              }
               value={recipients}
               onChange={(event) => setRecipients(event.target.value)}
               disabled={publishBusy}
@@ -328,7 +338,11 @@ export function SessionDetailView({ sessionId }: { sessionId: string }): React.J
 
             <div className="composer-footer">
               <span className="hint muted">
-                同一草稿版本、同一格式、同一批接收人只会投递一次。
+                {channel === 'im'
+                  ? imTargets.length > 0
+                    ? `IM 目标：${imTargets.join(' / ')}（群机器人一次只能发一个群）`
+                    : '当前 Workspace 没有配置 IM 目标'
+                  : '同一草稿版本、同一格式、同一批接收人只会投递一次。'}
               </span>
               <button
                 type="button"

@@ -82,6 +82,12 @@
           },
           "workspaceName": {
             "type": "string"
+          },
+          "imTarget": {
+            "type": "string"
+          },
+          "imCredentialKey": {
+            "type": "string"
           }
         },
         "required": [
@@ -140,7 +146,12 @@
           },
           "transport": {
             "type": "string",
-            "enum": ["smtp", "stream", "simulated"]
+            "enum": [
+              "smtp",
+              "stream",
+              "simulated",
+              "wecom-bot"
+            ]
           },
           "messageId": {
             "type": "string"
@@ -150,6 +161,12 @@
           },
           "deduplicated": {
             "type": "boolean"
+          },
+          "mediaId": {
+            "type": "string"
+          },
+          "imTarget": {
+            "type": "string"
           }
         },
         "required": [

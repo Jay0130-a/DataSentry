@@ -30,6 +30,8 @@ export function registerCatalogRoutes(app: FastifyInstance, ctx: AppContext): vo
         sources: workspace.sources,
         skills: workspace.skills,
         defaultPermissionMode: workspace.defaultPermissionMode,
+        /** 只暴露目标名，webhook key 在凭据里，永不出现在接口响应中。 */
+        imTargets: Object.keys(workspace.imTargets ?? {}),
         ruleVersion: workspace.ruleVersion,
         currency: workspace.currency,
         timezone: workspace.timezone,

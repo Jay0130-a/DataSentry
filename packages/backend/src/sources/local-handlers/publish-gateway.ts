@@ -11,6 +11,8 @@ import { dirname, join } from 'node:path'
 import { ErrorCode, hashValue, newId } from '@datasentry/core'
 import { composeReportMail } from '../../email/compose.ts'
 import { sendMail } from '../../email/sender.ts'
+import { composeImSummary } from '../../im/summary.ts'
+import { sendWecomFile, wecomBaseUrlOf } from '../../im/wecom.ts'
 import { ToolExecutionError } from '../transports/types.ts'
 import type { LocalToolHandlerMap } from '../transports/local.ts'
 
@@ -35,9 +37,13 @@ export interface PublishReceipt {
    * `smtp` 是真的发出去了；`stream` 只在测试里落盘（不联网）；
    * `simulated` 是 im / portal 这类尚未接真实渠道的占位。
    */
-  transport?: 'smtp' | 'stream' | 'simulated'
+  transport?: 'smtp' | 'stream' | 'simulated' | 'wecom-bot'
   /** 邮件报文 ID。仅 email 渠道有。 */
   messageId?: string
+  /** 企微素材 ID（有效期 3 天）。仅 im 渠道有。 */
+  mediaId?: string
+  /** 企微群目标名。仅 im 渠道有。 */
+  imTarget?: string
   publishedAt: string
   /** 去重键：(reportId, draftVersion, recipients, channel, format) 的稳定摘要。 */
   key: string
@@ -171,8 +177,13 @@ export const publishGatewayHandlers: LocalToolHandlerMap = {
 
     let transport: PublishReceipt['transport'] = 'simulated'
     let messageId: string | null = null
+    let mediaId: string | undefined
+    let imTarget: string | undefined
 
-    if (channel === 'email') {
+    // 只有真实渠道才有「发出去了但没记账」的窗口，模拟渠道不需要意图记录。
+    const isRealChannel = channel === 'email' || channel === 'im'
+
+    if (isRealChannel) {
       // 先落意图再发：进程在发送途中死掉时，这条记录就是「结果未知」的证据。
       mkdirSync(intentDir, { recursive: true })
       writeFileSync(
@@ -189,35 +200,78 @@ export const publishGatewayHandlers: LocalToolHandlerMap = {
         'utf8',
       )
 
-      const composed = composeReportMail({
-        reportId,
-        draftVersion,
-        fileName,
-        format,
-        ...(typeof args['workspaceName'] === 'string'
-          ? { workspaceName: args['workspaceName'] }
-          : {}),
-        ...(typeof args['period'] === 'string' ? { period: args['period'] } : {}),
-      })
-
       try {
-        const sent = await sendMail(
-          {
-            to: recipients,
-            subject: composed.subject,
-            text: composed.text,
-            attachments: [{ filename: fileName, path: artifactPath, contentType: mimeType }],
-          },
-          ctx.paths,
-        )
-        transport = sent.transport
-        messageId = sent.messageId
+        if (channel === 'email') {
+          const composed = composeReportMail({
+            reportId,
+            draftVersion,
+            fileName,
+            format,
+            ...(typeof args['workspaceName'] === 'string'
+              ? { workspaceName: args['workspaceName'] }
+              : {}),
+            ...(typeof args['period'] === 'string' ? { period: args['period'] } : {}),
+          })
+
+          const sent = await sendMail(
+            {
+              to: recipients,
+              subject: composed.subject,
+              text: composed.text,
+              attachments: [{ filename: fileName, path: artifactPath, contentType: mimeType }],
+            },
+            ctx.paths,
+          )
+          transport = sent.transport
+          messageId = sent.messageId
+        } else {
+          const targetName = String(args['imTarget'] ?? '')
+          const credentialKey = String(args['imCredentialKey'] ?? '')
+          if (!targetName || !credentialKey) {
+            throw new ToolExecutionError(
+              ErrorCode.CREDENTIAL_MISSING,
+              'IM 投递缺少群目标或凭据变量名',
+            )
+          }
+
+          // 密钥只在这里读一次，不进 args、事件或日志。
+          const webhookKey = ctx.credentials?.get(credentialKey)
+          if (!webhookKey) {
+            throw new ToolExecutionError(
+              ErrorCode.CREDENTIAL_MISSING,
+              `缺少 IM 凭据 "${credentialKey}"`,
+              { credentialKey },
+            )
+          }
+
+          const sent = await sendWecomFile({
+            baseUrl: wecomBaseUrlOf(),
+            webhookKey,
+            filePath: artifactPath,
+            fileName,
+            summaryMarkdown: composeImSummary({
+              reportId,
+              draftVersion,
+              fileName,
+              sizeBytes,
+              ...(typeof args['workspaceName'] === 'string'
+                ? { workspaceName: args['workspaceName'] }
+                : {}),
+              ...(typeof args['period'] === 'string' ? { period: args['period'] } : {}),
+            }),
+          })
+
+          transport = 'wecom-bot'
+          mediaId = sent.mediaId
+          imTarget = targetName
+        }
       } catch (err) {
-        // 明确失败（对方拒绝、连不上）：撤掉意图，允许重试。
+        // 明确失败（对方拒绝、连不上、缺凭据）：撤掉意图，允许重试。
         rmSync(intentPath, { force: true })
+        if (err instanceof ToolExecutionError) throw err
         throw new ToolExecutionError(
           ErrorCode.TOOL_EXECUTION_FAILED,
-          `邮件投递失败：${err instanceof Error ? err.message : String(err)}`,
+          `${channel === 'email' ? '邮件' : 'IM '}投递失败：${err instanceof Error ? err.message : String(err)}`,
         )
       }
     }
@@ -242,6 +296,8 @@ export const publishGatewayHandlers: LocalToolHandlerMap = {
       deliveredPath,
       transport,
       ...(messageId ? { messageId } : {}),
+      ...(mediaId ? { mediaId } : {}),
+      ...(imTarget ? { imTarget } : {}),
       publishedAt: new Date().toISOString(),
       key,
     }
@@ -257,7 +313,7 @@ export const publishGatewayHandlers: LocalToolHandlerMap = {
      * 现在中间任何一步失败，意图都还在，下一次调用会以 RECEIPT_UNKNOWN
      * 停下来等人核对。
      */
-    if (channel === 'email') rmSync(intentPath, { force: true })
+    if (isRealChannel) rmSync(intentPath, { force: true })
 
     return {
       data: { ...stripKey(receipt), deduplicated: false },

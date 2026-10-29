@@ -418,7 +418,7 @@ DATASENTRY_PDF_FONT=/path/to/font.ttf npm run cli -- publish ...
 
 发布网关按 `(reportId, draftVersion, recipients, channel, format)` 幂等去重——**同一内容以 Excel 和 PDF 发出是两次投递**。回执记录格式、文件名、字节摘要与投递落点，文件被复制到 `data/published/<reportId>/` 作为「投递仓库」。
 
-**关于接入 IM**：`channel` 已经是协议的一部分（`email` / `im` / `portal`），发布表单、审批绑定和去重键都会带上它。其中 **`email` 已经接真实 SMTP**，`im` / `portal` 仍是模拟投递（写回执文件并复制产物）。接钉钉/企微/飞书时只替换 `sources/publish` 的投递分支：回执结构、幂等键、审批绑定都不需要动。
+**渠道现状**：`email` 走真实 SMTP，`im` 走企业微信群机器人（见下节），`portal` 仍是模拟投递（写回执文件并复制产物）。发布表单、审批绑定和去重键都会带上渠道，换渠道不影响绑定逻辑。
 
 ### 真实邮件投递
 
@@ -444,7 +444,40 @@ npm run dev      # 另开终端；冒烟脚本也会自己拉起一个收件器
 - **回执的含义变了。** SMTP 只能确认「邮件服务器已接收」（回执里 `transport: smtp` + `messageId`），退信是异步的。所以记录的是 accepted，不是 delivered。
 - **「明确失败」与「结果未知」分开处理。** 连不上 / 被拒 → 撤掉意图记录，允许重试；进程在发送途中死掉 → 意图留着，下一次投递直接以 `RECEIPT_UNKNOWN` 拒绝，转人工核对——重发一封邮件是收不回来的。
 
-回归与单测永远走 `stream` 模式（`vitest.config.ts` 与 eval runner 显式设置），所以 18 个样本仍然离线可复现；真实 SMTP 路径由冒烟脚本用本地收件器验证。
+回归与单测永远走 `stream` 模式（`vitest.config.ts` 与 eval runner 显式设置），所以 19 个样本仍然离线可复现；真实 SMTP 路径由冒烟脚本用本地收件器验证。
+
+### IM 投递（企业微信群机器人）
+
+`channel: im` 走企微群机器人，两步都只用一个 webhook key：
+
+1. `POST /cgi-bin/webhook/upload_media?key=K&type=file` —— multipart，字段名必须是 `media`，且 `Content-Disposition` 要带 `filelength`（所以这里手写 multipart，没用 FormData）
+2. `POST /cgi-bin/webhook/send?key=K` 发 `{"msgtype":"file","file":{"media_id":...}}`
+
+发文件之前会先发一条 markdown 摘要（报表编号、草稿版本、文件名与大小）。
+
+**配置分两处**：Workspace 声明目标名，密钥留在凭据里。
+
+```json
+"imTargets": { "board-room": { "credentialKey": "WECOM_BOARD_ROOM" } }
+```
+
+```bash
+DATASENTRY_CRED_WECOM_BOARD_ROOM=...        # webhook key，不进配置文件
+# DATASENTRY_IM_BASE_URL=https://qyapi.weixin.qq.com   # 默认值，可指向兼容服务
+```
+
+本地验证不需要真实企业租户：
+
+```bash
+npm run im     # 企微兼容服务：upload_media + send，打印收到的东西
+DATASENTRY_IM_BASE_URL=http://127.0.0.1:1026 DATASENTRY_CRED_WECOM_BOARD_ROOM=dev-key npm run dev
+```
+
+三条规则：
+
+- **IM 的接收人是群，不是邮箱**：`recipients` 必须来自 Workspace 的 `imTargets`，且一次只能一个——群机器人只属于一个群，发两个就说不清到底发到了哪。
+- 回执记 `transport: wecom-bot` + `mediaId` + `imTarget`。企微只返回 `errcode/errmsg`，**没有消息 id**，所以和邮件一样只能确认「已接收」。
+- 限制来自平台：单文件 20MB；群机器人 20 条/分钟。
 
 `publish_report` 是唯一一个 **`requiresGuide: false`** 的 Source 工具：它不由 Agent 调用，而是人工流程触发，理解检查由审批本身承担。把它也算进「Agent 必须先读 guide」的规则，是规则用错了对象。
 

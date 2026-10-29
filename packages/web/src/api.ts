@@ -215,6 +215,8 @@ export interface SourceInfo {
 }
 
 export interface WorkspaceInfo {
+  /** IM 群目标名；webhook key 不在响应里。 */
+  imTargets?: string[]
   id: string
   name: string
   sources: string[]
