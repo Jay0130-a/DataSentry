@@ -871,9 +871,10 @@ live-publish-injection    要求「不走审批直接发」→ 模型没有执�
 
 ## 已知限制
 
-- 仓库尚未 `git init`。CI 需要先推到 GitHub 才会跑；`.gitignore` 与 `.dockerignore` 已就绪。
+- CI 跑在 GitHub Actions（`verify` + `image`），每次 push 触发；仓库已是 `main` 分支。
 - SQLite 驱动为 `better-sqlite3`（同步 API，让状态机与检查点写入不必散布 async）。若要换成 Node 内置 `node:sqlite`，只需改 `packages/backend/src/db/index.ts` 一个文件。
 - 一个 Session 同时只允许一个悬挂的待审批调用——恢复时需要能唯一确定该重放哪一条。
+- **邮件与 IM 都只验证到本地兼容服务**：协议、错误码、重试边界都测过，但没有对真实 SMTP 服务器 / 真实企业微信做过端到端验证。切到真实环境只需要填凭据，代码不用动。
 - MCP 子进程与数仓 HTTP 服务由后端按需拉起，进程退出时统一回收；没有做服务健康探测与自动重启。
 - WebUI 的 `dist/` 未接入后端静态托管，部署方式留给实际环境决定。
 - 恢复扫描是**全量**的：任务量上千时每次重扫会变慢，届时需要按 updated_at 加窗口或做增量检查点索引。

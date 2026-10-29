@@ -29,6 +29,8 @@ services:
       DATASENTRY_SMTP_HOST: mailpit
       DATASENTRY_SMTP_PORT: "1025"
       DATASENTRY_SMTP_FROM: datasentry@example.com
+      # 真实 IM 投递：把 key 放进 .env 后取消注释（默认走本地，不设这条）
+      # DATASENTRY_CRED_WECOM_BOARD_ROOM: ${DATASENTRY_CRED_WECOM_BOARD_ROOM:-}
     volumes:
       - ds-data:/app/data
     depends_on:
