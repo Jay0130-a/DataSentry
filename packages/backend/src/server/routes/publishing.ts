@@ -84,6 +84,20 @@ export function registerPublishingRoutes(app: FastifyInstance, ctx: AppContext):
       }
     }
 
+    if (result.status === 'already-published') {
+      return {
+        status: 'already-published',
+        receiptId: result.receiptId,
+        report: {
+          reportId: result.report.id,
+          sessionId: result.report.sessionId,
+          status: result.report.status,
+          draftVersion: result.report.draftVersion,
+          receiptId: result.report.receiptId,
+        },
+      }
+    }
+
     const report = result.report
     return {
       status: 'published',

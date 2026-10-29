@@ -14,7 +14,7 @@ import { ErrorCode, hashValue, newId } from '@datasentry/core'
 import { composeReportMail } from '../../email/compose.ts'
 import { sendMail } from '../../email/sender.ts'
 import { composeImSummary } from '../../im/summary.ts'
-import { sendWecomFile, wecomBaseUrlOf } from '../../im/wecom.ts'
+import { sendWecomFile, WecomError, wecomBaseUrlOf } from '../../im/wecom.ts'
 import { ToolExecutionError } from '../transports/types.ts'
 import type { LocalToolHandlerMap } from '../transports/local.ts'
 
@@ -49,6 +49,36 @@ export interface PublishReceipt {
   publishedAt: string
   /** 去重键：(reportId, draftVersion, recipients, channel, format) 的稳定摘要。 */
   key: string
+}
+
+/**
+ * 这个错误能否证明「消息没有发出去」。
+ *
+ * 只有明确的前置失败才允许撤掉 intent：连接被拒、DNS 失败、认证失败、
+ * 信封被拒、企微平台返回 errcode。超时、socket 中断、发送后 5xx 都属于
+ * 「可能已经到达对方」——intent 必须保留，下一次以 RECEIPT_UNKNOWN 拦下。
+ */
+export function isDefinitelyNotDelivered(err: unknown, channel: string): boolean {
+  if (err instanceof ToolExecutionError) return true
+
+  const code = (err as { code?: unknown }).code
+  const message = err instanceof Error ? err.message : ''
+  // nodemailer 会把连接阶段的 ECONNREFUSED 包成 ESOCKET，真正的错误码在 message 里。
+  const refused =
+    code === 'ECONNREFUSED' ||
+    code === 'ENOTFOUND' ||
+    code === 'EAI_AGAIN' ||
+    /ECONNREFUSED|ENOTFOUND|EAI_AGAIN/.test(message)
+
+  if (channel === 'im') {
+    if (!(err instanceof WecomError)) return refused
+    // summary 阶段还没发文件；upload/send 只有平台给出明确 errcode 才算未发出。
+    // errcode -1 是「非 JSON / 系统繁忙」这类无法确定的响应，必须按结果未知处理。
+    return err.step === 'summary' || err.errcode > 0
+  }
+
+  if (refused) return true
+  return code === 'EAUTH' || code === 'EENVELOPE'
 }
 
 /** 读取全部回执。M4 的「结果未知时先查回执」走这条路。 */
@@ -305,20 +335,32 @@ export const publishGatewayHandlers: LocalToolHandlerMap = {
 
     if (isRealChannel) {
       // 先落意图再发：进程在发送途中死掉时，这条记录就是「结果未知」的证据。
+      // `wx` 让「检查 + 创建」变成原子操作：两个进程同时确认时只有一个能开始投递。
       mkdirSync(intentDir, { recursive: true })
-      writeFileSync(
-        intentPath,
-        JSON.stringify({
-          key,
-          at: new Date().toISOString(),
-          reportId,
-          draftVersion,
-          recipients,
-          channel,
-          format,
-        }),
-        'utf8',
-      )
+      try {
+        writeFileSync(
+          intentPath,
+          JSON.stringify({
+            key,
+            at: new Date().toISOString(),
+            reportId,
+            draftVersion,
+            recipients,
+            channel,
+            format,
+          }),
+          { encoding: 'utf8', flag: 'wx' },
+        )
+      } catch (err) {
+        if ((err as NodeJS.ErrnoException).code === 'EEXIST') {
+          throw new ToolExecutionError(
+            ErrorCode.RECEIPT_UNKNOWN,
+            `另一个投递进程已经开始了同一份报表的投递（${key.slice(0, 12)}…），无法确定是否已发出；请人工核对`,
+            { key },
+          )
+        }
+        throw err
+      }
 
       try {
         if (channel === 'email') {
@@ -386,8 +428,11 @@ export const publishGatewayHandlers: LocalToolHandlerMap = {
           imTarget = targetName
         }
       } catch (err) {
-        // 明确失败（对方拒绝、连不上、缺凭据）：撤掉意图，允许重试。
-        rmSync(intentPath, { force: true })
+        // 只有能证明「没发出去」的错误才撤掉意图；否则保留 intent，
+        // 让下一次调用以 RECEIPT_UNKNOWN 停下，而不是悄悄重发。
+        if (isDefinitelyNotDelivered(err, channel)) {
+          rmSync(intentPath, { force: true })
+        }
         if (err instanceof ToolExecutionError) throw err
         throw new ToolExecutionError(
           ErrorCode.TOOL_EXECUTION_FAILED,

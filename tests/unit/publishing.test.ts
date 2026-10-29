@@ -2,7 +2,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { createHash } from 'node:crypto'
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { ErrorCode, isDataSentryError, type Report } from '@datasentry/core'
+import { ApprovalStatus, ErrorCode, isDataSentryError, type Report } from '@datasentry/core'
 import { createAppContext, type AppContext } from '@datasentry/backend/context.ts'
 import { computeRecipientsHash, precheckPublish } from '@datasentry/backend/reports/publishing.ts'
 import { seedAll } from '@datasentry/mcp-sources'
@@ -492,5 +492,51 @@ describe('Agent 不能直接发布', () => {
     expect(outcome.results).toHaveLength(0)
     // 关键：不是「先挂起等审批」，而是根本没有进入审批流程
     expect(ctx.approvals.listBySession(session.id)).toHaveLength(0)
+  })
+})
+
+describe('发布请求取代与幂等', () => {
+  it('新的发布请求会结束旧的悬挂调用，pending 不累积', async () => {
+    const report = await readyReport('2024-08')
+    const request = {
+      recipients: ['board@example.com'],
+      channel: 'email' as const,
+      format: 'xlsx' as const,
+    }
+
+    const first = await ctx.requestPublish(report.id, request)
+    const second = await ctx.requestPublish(report.id, request)
+
+    expect(ctx.toolCalls.require(first.toolCall.id).status).toBe('denied')
+    expect(ctx.approvals.require(first.approval.id).status).toBe(ApprovalStatus.REVOKED)
+    expect(ctx.approvals.latestPending(report.sessionId)?.id).toBe(second.approval.id)
+    // 只留新请求这一条悬挂调用
+    expect(ctx.toolCalls.pendingBySession(report.sessionId)).toHaveLength(1)
+  })
+
+  it('重复确认返回 already-published，不重复写投递事件', async () => {
+    const report = await readyReport('2024-07')
+    const { approval } = await ctx.requestPublish(report.id, {
+      recipients: ['board@example.com'],
+      channel: 'email',
+      format: 'xlsx',
+    })
+    ctx.decideApproval(approval.id, { decision: 'granted', approver: '财务总监' })
+
+    const first = await ctx.confirmPublish(approval.id)
+    expect(first.status).toBe('published')
+
+    const countExecuted = (): number =>
+      ctx.events.readJsonl(report.sessionId).filter((event) => event.type === 'publish.executed')
+        .length
+    const before = countExecuted()
+
+    const second = await ctx.confirmPublish(approval.id)
+    expect(second.status).toBe('already-published')
+    if (second.status === 'already-published') {
+      expect(second.receiptId).toBeTruthy()
+    }
+    expect(countExecuted()).toBe(before)
+    expect(ctx.publishReceipts(report.id)).toHaveLength(1)
   })
 })

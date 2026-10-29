@@ -217,3 +217,45 @@ describe('参数与摘要必须自洽', () => {
     expect(outcome.errorCode).not.toBe(ErrorCode.APPROVAL_PARAMS_DRIFT)
   })
 })
+
+describe('already-published 的恢复收敛', () => {
+  it('report 已发布但会话仍 WAITING_APPROVAL：恢复补到 DONE，不重发', async () => {
+    const report = await readyReport('2025-07')
+    const { receiptId } = await publish(report)
+
+    // 模拟 finalizePublish 写完 report、还没来得及转 session 就崩溃。
+    ctx.database.sqlite
+      .prepare('UPDATE session SET state = ? WHERE id = ?')
+      .run(SessionState.WAITING_APPROVAL, report.sessionId)
+
+    const result = await ctx.runRecovery({
+      execute: true,
+      sessionIds: [report.sessionId],
+    })
+
+    expect(result.errors).toEqual([])
+    expect(result.findings[0]?.action).toBe('resolve-publish')
+    expect(ctx.sessions.require(report.sessionId).state).toBe(SessionState.DONE)
+    expect(ctx.reports.require(report.id).receiptId).toBe(receiptId)
+    // 关键：没有第二条回执
+    expect(ctx.publishReceipts(report.id)).toHaveLength(1)
+  })
+
+  it('report 已发布但会话是 READY：恢复同样补到 DONE', async () => {
+    const report = await readyReport('2025-06')
+    await publish(report)
+
+    ctx.database.sqlite
+      .prepare('UPDATE session SET state = ? WHERE id = ?')
+      .run(SessionState.READY, report.sessionId)
+
+    const result = await ctx.runRecovery({
+      execute: true,
+      sessionIds: [report.sessionId],
+    })
+
+    expect(result.errors).toEqual([])
+    expect(result.findings[0]?.action).toBe('resolve-publish')
+    expect(ctx.sessions.require(report.sessionId).state).toBe(SessionState.DONE)
+  })
+})

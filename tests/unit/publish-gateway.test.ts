@@ -3,8 +3,9 @@ import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { ErrorCode } from '@datasentry/core'
-import { publishGatewayHandlers } from '@datasentry/backend/sources/local-handlers/publish-gateway.ts'
+import { publishGatewayHandlers, isDefinitelyNotDelivered } from '@datasentry/backend/sources/local-handlers/publish-gateway.ts'
 import { ToolExecutionError } from '@datasentry/backend/sources/transports/types.ts'
+import { WecomError } from '@datasentry/backend/im/wecom.ts'
 import { tempPaths, type TempPaths } from '../helpers/tmp.ts'
 
 /**
@@ -148,5 +149,59 @@ describe('发布网关：投递前复核文件', () => {
       baseArgs({ artifactPath: join(temp.paths.artifacts, 'missing.xlsx') }),
       ErrorCode.APPROVAL_PARAMS_DRIFT,
     )
+  })
+})
+
+describe('intent 只在能证明未发出时撤销', () => {
+  function withCode(code: string): Error {
+    return Object.assign(new Error(code), { code })
+  }
+
+  it('连接拒绝、DNS、认证、信封错误视为明确未发出', () => {
+    for (const code of ['ECONNREFUSED', 'ENOTFOUND', 'EAI_AGAIN', 'EAUTH', 'EENVELOPE']) {
+      expect(isDefinitelyNotDelivered(withCode(code), 'email')).toBe(true)
+    }
+    // nodemailer 把连接拒绝包成 ESOCKET，真错误在 message 里
+    expect(
+      isDefinitelyNotDelivered(
+        Object.assign(new Error('connect ECONNREFUSED 127.0.0.1:1'), {
+          code: 'ESOCKET',
+          command: 'CONN',
+        }),
+        'email',
+      ),
+    ).toBe(true)
+    // 只有 CONN 标记、没有连接拒绝证据：可能是 DATA 之后的 socket 中断
+    expect(
+      isDefinitelyNotDelivered(
+        Object.assign(new Error('socket hang up'), { code: 'ESOCKET', command: 'CONN' }),
+        'email',
+      ),
+    ).toBe(false)
+  })
+
+  it('超时、socket 中断、未知错误视为结果未知', () => {
+    for (const code of ['ETIMEDOUT', 'ESOCKET', 'ECONNECTION', 'EPIPE']) {
+      expect(isDefinitelyNotDelivered(withCode(code), 'email')).toBe(false)
+    }
+    expect(isDefinitelyNotDelivered(new Error('boom'), 'email')).toBe(false)
+  })
+
+  it('企微平台 errcode 视为未发出，网络错误/系统繁忙视为未知', () => {
+    expect(isDefinitelyNotDelivered(new WecomError('summary', -1, 'bad gateway'), 'im')).toBe(true)
+    expect(isDefinitelyNotDelivered(new WecomError('upload', 40001, 'bad key'), 'im')).toBe(true)
+    // -1：非 JSON / 系统繁忙，无法确定文件是否发出
+    expect(isDefinitelyNotDelivered(new WecomError('send', -1, 'bad gateway'), 'im')).toBe(false)
+    expect(isDefinitelyNotDelivered(new Error('network down'), 'im')).toBe(false)
+    expect(isDefinitelyNotDelivered(withCode('ECONNREFUSED'), 'im')).toBe(true)
+  })
+
+  it('ToolExecutionError 是明确的前置失败', () => {
+    expect(
+      isDefinitelyNotDelivered(
+        new ToolExecutionError(ErrorCode.CREDENTIAL_MISSING, '缺少凭据'),
+        'email',
+      ),
+    ).toBe(true)
   })
 })

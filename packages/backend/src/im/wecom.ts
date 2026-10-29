@@ -40,7 +40,7 @@ export function wecomBaseUrlOf(env: NodeJS.ProcessEnv = process.env): string {
   return env['DATASENTRY_IM_BASE_URL'] || 'https://qyapi.weixin.qq.com'
 }
 
-class WecomError extends Error {
+export class WecomError extends Error {
   constructor(
     readonly step: 'summary' | 'upload' | 'send',
     readonly errcode: number,

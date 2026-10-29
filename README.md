@@ -660,6 +660,7 @@ pi 循环下的关键差异：
 - **参数 Schema 由 pi 先校验**：非法参数不会进钩子，我们从 `turn_end` 的错误结果里识别出来，补记一条被拒调用后转 `BLOCKED`（保持原有语义）。
 - **对话记录落盘**：每条消息追加到 `data/agents/<sessionId>.jsonl`。这是跨进程恢复的唯一依据。
 - **跨重启恢复**：进程在审批等待中被杀掉后，新进程读取 `tool_call` 表里的悬挂调用 + 对话记录，执行被批准的调用、补一条 `toolResult`，再用 `agent.continue()` 接着跑。**不重新规划**。
+- **PAUSED 的恢复仍走 legacy**：pi 循环目前只实现审批等待（`WAITING_APPROVAL`）的跨重启恢复；执行中断留下的 `PAUSED` 由 recovery 的检查点路径接管。直接对 `PAUSED` 调 `resumeSession` 会以 `ILLEGAL_STATE_TRANSITION` 拒绝，而不是删掉对话记录重跑。
 - **两个循环各有一个专属样本**：
   - `approval-params-drift-rejected`（legacy-only）——它的流程是「run 停下来 → 篡改 → 恢复」，而 pi 的 run 不返回。
   - `approval-params-drift-rejected-after-restart`（pi-only）——`run → restart → 篡改 → 恢复`。跨进程恢复会重新读库，这才是 pi 下可被篡改的路径。

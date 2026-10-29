@@ -12,10 +12,11 @@ import type { ApprovalStore } from './approval-store.ts'
 import type { CheckpointStore } from './checkpoint.ts'
 import type { SessionStore } from './session-store.ts'
 import type { ToolCallStore } from './tool-call-store.ts'
+import type { ReportStore } from './report-store.ts'
 
 /** `reconcilePublish` 的结论；与 PublishService 的 ReconcileResult 同构。 */
 export type ReconcileOutcome =
-  | { status: 'already-published' }
+  | { status: 'already-published'; receiptId: string }
   | { status: 'reconciled'; receiptId: string }
   | { status: 'not-delivered'; reason: string }
   | { status: 'unknown'; reason: string }
@@ -26,8 +27,8 @@ export type RecoveryAction =
   | 'skip-terminal'
   /** BLOCKED / MANUAL_REVIEW / READY —— 等人工或已就绪，不动。 */
   | 'skip-idle'
-  /** 显式暂停，等人工触发继续。 */
-  | 'skip-paused'
+  /** 显式暂停；`recover --execute` 会从检查点继续。 */
+  | 'resume-paused'
   /** 仍在等审批，不动。 */
   | 'awaiting-approval'
   /** 审批已通过：可以重放原 ToolCall。 */
@@ -83,6 +84,8 @@ export interface RecoveryResult {
 
 /** 这些状态下进程已经不可能还在跑，状态本身是稳定的。 */
 const IDLE_STATES: readonly Session['state'][] = [
+  // 新建但从未执行：没有残留执行器，也不该由恢复流程替人启动。
+  SessionState.INIT,
   SessionState.BLOCKED,
   SessionState.MANUAL_REVIEW,
   SessionState.READY,
@@ -111,6 +114,7 @@ export class RecoveryService {
       toolCalls: ToolCallStore
       approvals: ApprovalStore
       checkpoints: CheckpointStore
+      reports: ReportStore
       events: EventStore
       /**
        * 查回执并补齐发布记账。由 context 注入（它持有 PublishService）。
@@ -168,6 +172,7 @@ export class RecoveryService {
           options.execute === true &&
           options.resume !== undefined &&
           (finding.action === 'resume-approved' ||
+            finding.action === 'resume-paused' ||
             finding.action === 'mark-interrupted' ||
             finding.action === 'continue-from-checkpoint')
 
@@ -198,7 +203,9 @@ export class RecoveryService {
     const pending = allCalls.filter((call) => call.status === 'pending')
     const completedSteps = allCalls.filter((call) => call.status !== 'pending').length
     const lastCheckpoint = checkpoints.latest(session.id) ?? null
-    const pendingCall = pending[0] ?? null
+    // 多条悬挂调用只可能来自历史脏数据（新请求会结束被取代的旧调用）；
+    // 取最新一条，才是当前真正在等的那次。
+    const pendingCall = pending[pending.length - 1] ?? null
     const approval = pendingCall ? (approvals.byToolCall(pendingCall.id) ?? null) : null
 
     const base = {
@@ -239,14 +246,53 @@ export class RecoveryService {
       reason,
     })
 
+    /**
+     * `apply-denial` 的 finding 必须自带审批记录。
+     *
+     * 没有悬挂调用时 `base.approval` 是 null，但 normalize 需要按 id 取审批；
+     * 之前这里直接把 null 传下去，恢复会在解引用时抛 TypeError，会话永久卡住。
+     */
+    const decideDenial = (
+      action: RecoveryAction,
+      reason: string,
+      record: Approval,
+    ): RecoveryFinding => ({
+      ...base,
+      approval: {
+        id: record.id,
+        kind: record.kind,
+        status: record.status,
+        expiresAt: record.expiresAt,
+      },
+      action,
+      reason,
+    })
+
     if (isTerminal(session.state)) {
       return decide('skip-terminal', `状态 ${session.state} 已终结，无需处理`)
+    }
+    // 恢复和 resume 都要求恰好一条悬挂调用；多条只可能来自历史脏数据，
+    // 猜哪一条都会重放错的调用，交给人工比自动选一条安全。
+    if (pending.length > 1) {
+      return decide(
+        'needs-manual-review',
+        `存在 ${pending.length} 条悬挂工具调用，无法确定该重放哪一条`,
+      )
+    }
+    if (session.state === SessionState.READY) {
+      const report = this.deps.reports.bySession(session.id)
+      if (report?.status === 'published') {
+        return decide(
+          'resolve-publish',
+          '报表已发布，但会话仍是 READY——查回执后把状态补齐到 DONE',
+        )
+      }
     }
     if (IDLE_STATES.includes(session.state)) {
       return decide('skip-idle', `状态 ${session.state} 处于稳定态，等人工推进`)
     }
     if (session.state === SessionState.PAUSED) {
-      return decide('skip-paused', '显式暂停，等待人工触发恢复')
+      return decide('resume-paused', '显式暂停；recover --execute 将从检查点继续')
     }
 
     if (session.state === SessionState.WAITING_APPROVAL) {
@@ -282,9 +328,10 @@ export class RecoveryService {
             `状态是 WAITING_APPROVAL，但没有悬挂调用，而审批 ${latest.id} 仍未决——状态与记录不一致`,
           )
         }
-        return decide(
+        return decideDenial(
           'apply-denial',
           `审批 ${latest.id} 状态为 ${latest.status}，需要把后果落到会话状态上`,
+          latest,
         )
       }
 
@@ -314,9 +361,10 @@ export class RecoveryService {
             `审批 ${approval.id} 仍未决，任务继续等待（过期于 ${approval.expiresAt}）`,
           )
         default:
-          return decide(
+          return decideDenial(
             'apply-denial',
             `审批 ${approval.id} 状态为 ${approval.status}，需要把后果落到会话状态上`,
+            approval,
           )
       }
     }
@@ -344,7 +392,7 @@ export class RecoveryService {
     switch (finding.action) {
       case 'skip-terminal':
       case 'skip-idle':
-      case 'skip-paused':
+      case 'resume-paused':
       case 'awaiting-approval':
       case 'awaiting-publish-confirmation':
       case 'resume-approved':
@@ -363,8 +411,44 @@ export class RecoveryService {
 
         const outcome = await reconcile(session.id)
         switch (outcome.status) {
-          case 'already-published':
-            return null
+          case 'already-published': {
+            /*
+             * `finalizePublish` 先写 report 再转 session。进程在两步之间挂掉时，
+             * 报表已经是 published，会话却还停在 WAITING_APPROVAL。
+             * 这时 reconcile 会返回 already-published；恢复必须把会话补到 DONE，
+             * 否则每次扫描都得出同一个结论、又什么都不做，任务永久卡住。
+             */
+            const current = sessions.require(session.id)
+            if (current.state === SessionState.DONE) return null
+            if (
+              current.state !== SessionState.WAITING_APPROVAL &&
+              current.state !== SessionState.READY
+            ) {
+              return null
+            }
+            sessions.transition(current.id, current.stateVersion, SessionState.DONE)
+            events.emit({
+              sessionId: current.id,
+              traceId: current.traceId,
+              type: EventType.StateChanged,
+              payload: {
+                from: current.state,
+                to: SessionState.DONE,
+                reason: 'recovery:already-published',
+                detail: `报表已发布（回执 ${outcome.receiptId}），补齐会话状态`,
+              },
+            })
+            events.emit({
+              sessionId: current.id,
+              traceId: current.traceId,
+              type: EventType.PublishReconciled,
+              payload: {
+                receiptId: outcome.receiptId,
+                reason: '进程在投递记账与状态转移之间中断；报表已发布，补齐会话状态',
+              },
+            })
+            return `报表已发布（回执 ${outcome.receiptId}），已补齐会话状态到 DONE`
+          }
 
           case 'reconciled':
             return `网关已有回执 ${outcome.receiptId}，已补齐记账；未重发`
