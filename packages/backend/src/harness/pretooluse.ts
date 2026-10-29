@@ -170,7 +170,9 @@ const publishRequiresConfirmation: PreToolUseCheck = {
   run(ctx) {
     const tool = ctx.tool
     if (!tool || tool.sideEffect !== 'publish') return null
-    if (ctx.allowPublish === true) return null
+    // 入口标记必须与审批记录本身绑定：只看调用方传的布尔值，
+    // 等于把「能不能发」重新交给了一个可以被误用的参数。
+    if (ctx.allowPublish === true && ctx.approval?.kind === 'publish') return null
 
     return {
       effect: 'deny',

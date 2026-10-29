@@ -9,7 +9,7 @@ import {
   rmSync,
   writeFileSync,
 } from 'node:fs'
-import { basename, dirname, isAbsolute, join, relative } from 'node:path'
+import { basename, dirname, isAbsolute, join, relative, sep } from 'node:path'
 import { ErrorCode, hashValue, newId } from '@datasentry/core'
 import { composeReportMail } from '../../email/compose.ts'
 import { sendMail } from '../../email/sender.ts'
@@ -119,19 +119,55 @@ export function hasPublishIntent(receiptsFile: string, key: string): boolean {
   return existsSync(join(dirname(receiptsFile), 'intents', `${key}.json`))
 }
 
-/** 文件名只能是纯文件名——`../x`、`a/b` 这类值会把投递仓库的落点带出目录。 */
-function assertSafeFileName(fileName: string): void {
+/**
+ * 文件名或目录名只能是一个路径段。
+ *
+ * 除了 `/`、`\`、`..`，还要挡住 Windows 上会被解释成别的东西的写法：
+ * 保留设备名（NUL/CON/COM1…）、结尾的点或空格、`:` 数据流、控制字符。
+ * 这些名字在 Linux 上合法、在 Windows 上却指向另一个对象，投递落点会失真。
+ */
+function assertSafePathSegment(value: string, label: string): void {
   if (
-    !fileName ||
-    fileName === '.' ||
-    fileName === '..' ||
-    basename(fileName) !== fileName ||
-    fileName.includes('/') ||
-    fileName.includes('\\')
+    !value ||
+    value === '.' ||
+    value === '..' ||
+    basename(value) !== value ||
+    value.includes('/') ||
+    value.includes('\\') ||
+    value.includes(':') ||
+    /[\u0000-\u001f]/.test(value) ||
+    value.endsWith('.') ||
+    value.endsWith(' ')
   ) {
     throw new ToolExecutionError(
       ErrorCode.SCHEMA_INVALID,
-      `fileName 必须是纯文件名（不能包含路径分隔符或 ..）：${JSON.stringify(fileName)}`,
+      `${label} 必须是安全的路径片段（不能包含分隔符、..、冒号或首尾空白）：${JSON.stringify(value)}`,
+    )
+  }
+}
+
+const WINDOWS_RESERVED_NAME = /^(con|prn|aux|nul|com[1-9]|lpt[1-9])(\..*)?$/i
+
+function assertNotReservedDeviceName(value: string, label: string): void {
+  if (WINDOWS_RESERVED_NAME.test(value)) {
+    throw new ToolExecutionError(
+      ErrorCode.SCHEMA_INVALID,
+      `${label} 不能是 Windows 保留设备名：${JSON.stringify(value)}`,
+    )
+  }
+}
+
+function assertSafeFileName(fileName: string): void {
+  assertSafePathSegment(fileName, 'fileName')
+  assertNotReservedDeviceName(fileName, 'fileName')
+}
+
+function assertInside(root: string, target: string, label: string): void {
+  const rel = relative(root, target)
+  if (!rel || rel === '..' || rel.startsWith(`..${sep}`) || isAbsolute(rel)) {
+    throw new ToolExecutionError(
+      ErrorCode.SCHEMA_INVALID,
+      `${label} 必须位于允许的目录内：${target}`,
     )
   }
 }
@@ -162,15 +198,17 @@ function verifyArtifact(input: {
   }
 
   const root = realpathSync(input.artifactsRoot)
-  const rel = relative(root, resolved)
-  if (!rel || rel.startsWith('..') || isAbsolute(rel)) {
+  assertInside(root, resolved, 'artifactPath')
+
+  let bytes: Buffer
+  try {
+    bytes = readFileSync(resolved)
+  } catch {
     throw new ToolExecutionError(
-      ErrorCode.SCHEMA_INVALID,
-      `artifactPath 必须位于产物目录内：${input.artifactPath}`,
+      ErrorCode.APPROVAL_PARAMS_DRIFT,
+      `要发布的文件不可读（可能是目录或权限不足）：${input.artifactPath}`,
     )
   }
-
-  const bytes = readFileSync(resolved)
   const actualSha = createHash('sha256').update(bytes).digest('hex')
   if (actualSha !== input.sha256) {
     throw new ToolExecutionError(
@@ -202,6 +240,8 @@ export const publishGatewayHandlers: LocalToolHandlerMap = {
     if (!file) throw new Error('publish-gateway 缺少 options.file')
 
     const reportId = String(args['reportId'])
+    assertSafePathSegment(reportId, 'reportId')
+    assertNotReservedDeviceName(reportId, 'reportId')
     const draftVersion = String(args['draftVersion'])
     const recipients = normalizeRecipients((args['recipients'] as unknown[]).map(String))
     const channel = String(args['channel'])
@@ -357,7 +397,9 @@ export const publishGatewayHandlers: LocalToolHandlerMap = {
     }
 
     // 投递仓库留一份：无论真实发送还是模拟渠道，落点与字节都要能复核。
-    const outDir = join(dirname(file), reportId)
+    const publishedRoot = dirname(file)
+    const outDir = join(publishedRoot, reportId)
+    assertInside(publishedRoot, outDir, 'reportId')
     mkdirSync(outDir, { recursive: true })
     const deliveredPath = join(outDir, fileName)
     copyFileSync(verifiedArtifactPath, deliveredPath)

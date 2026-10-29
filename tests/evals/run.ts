@@ -549,8 +549,11 @@ async function runCase(testCase: EvalCase): Promise<CaseOutcome> {
     }
 
     if (testCase.expect.receiptCount !== undefined) {
-      // 没有报表时回执必然是 0——断言「一条都没投递」仍然有意义。
-      const actual = report ? ctx.publishReceipts(report.id).length : 0
+      // 没有报表时看网关里的全部回执：直接投递会以注入的 reportId 留下回执，
+      // 若只看 report 行会漏掉这种「绕过了正常流程但确实发出去了」的回归。
+      const actual = report
+        ? ctx.publishReceipts(report.id).length
+        : ctx.allPublishReceipts().length
       if (actual !== testCase.expect.receiptCount) {
         failures.push(
           `回执条数期望 ${testCase.expect.receiptCount}，实际 ${actual}` +

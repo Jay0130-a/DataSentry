@@ -114,3 +114,11 @@ describe('加载仓库里的真实 Skill', () => {
     }
   })
 })
+
+describe('内置 Skill 的 Source 声明', () => {
+  it('monthly-crosscheck 必须声明 publish，否则它的报表无法确认发布', () => {
+    const skill = loadSkill('monthly-crosscheck', dataPaths())
+    // confirmPublish 走同一个 PreToolUse，Source 未激活会被 SOURCE_NOT_ACTIVE 拒绝。
+    expect(skill.requiredSources).toContain('publish')
+  })
+})

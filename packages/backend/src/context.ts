@@ -167,6 +167,8 @@ export interface AppContext {
   reconcilePublish(sessionId: string): Promise<ReconcileResult>
   /** 某个报表的全部回执，按发布时间升序。 */
   publishReceipts(reportId: string): PublishReceipt[]
+  /** 网关里的全部回执。用于「没有报表也要证明没有投递」的断言。 */
+  allPublishReceipts(): PublishReceipt[]
 
   /**
    * 重启后核对中断的任务。
@@ -650,6 +652,7 @@ export async function createAppContext(options: AppContextOptions = {}): Promise
       return publishing.reconcilePublish(sessionId)
     },
     publishReceipts: (reportId) => receiptsForReport(publishReceiptsFile(), reportId),
+    allPublishReceipts: () => readReceipts(publishReceiptsFile()),
 
     async runRecovery(options = {}): Promise<RecoveryResult> {
       if (options.execute === true) await ensureSources()

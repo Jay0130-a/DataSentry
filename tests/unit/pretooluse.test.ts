@@ -396,4 +396,21 @@ describe('发布只能由确认入口执行', () => {
     const verdict = evaluatePreToolUse(publishContext({ allowPublish: true }))
     expect(verdict).toMatchObject({ effect: 'allow' })
   })
+
+  it('只有入口标记、审批不是发布类时仍然拒绝', () => {
+    const verdict = evaluatePreToolUse(
+      publishContext({
+        allowPublish: true,
+        approval: approval({
+          toolName: publishTool.name,
+          paramsHash: hashValue(args),
+          kind: 'tool-call',
+        }),
+      }),
+    )
+    expect(verdict).toMatchObject({
+      effect: 'deny',
+      code: ErrorCode.PUBLISH_NOT_CONFIRMED,
+    })
+  })
 })

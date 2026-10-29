@@ -695,7 +695,11 @@ export class AgentRunner {
         guideRead:
           tool.kind === 'builtin' || guides.hasRead(state.session.id, tool.sourceSlug),
       })),
-      activeSourceSlugs: state.activeSourceSlugs,
+      // 只告诉模型「现在真的能用的 Source」：发布源仍在激活集合里供 confirmPublish
+      // 使用，但它的工具不对模型开放，列出来只会诱导模型去调一个不存在的入口。
+      activeSourceSlugs: state.activeSourceSlugs.filter((slug) =>
+        registry.bySource(slug).some(isAgentCallableTool),
+      ),
       history: state.history,
     }
   }

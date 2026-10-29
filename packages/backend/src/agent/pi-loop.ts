@@ -11,6 +11,7 @@ import {
   newResultId,
   SessionState,
   validateWithJsonSchema,
+  type Approval,
   type DataPaths,
   type LoadedSkill,
   type Report,
@@ -25,7 +26,7 @@ import type { ToolRegistry } from '../harness/tool-registry.ts'
 import type { RegisteredTool } from '../sources/builder.ts'
 import type { GuideTracker } from '../harness/guide-tracker.ts'
 import { isAgentCallableTool, READ_SOURCE_GUIDE_TOOL } from '../harness/tool-registry.ts'
-import { evaluatePreToolUse } from '../harness/pretooluse.ts'
+import { evaluatePreToolUse, type PreToolUseResult } from '../harness/pretooluse.ts'
 import type { ApprovalStore } from '../runtime/approval-store.ts'
 import type { ApprovalGate } from '../runtime/approval-gate.ts'
 import type { CheckpointStore } from '../runtime/checkpoint.ts'
@@ -476,19 +477,15 @@ export class PiAgentRunner {
      * `runCall` 里重跑了一遍 PreToolUse，pi 的恢复不能走一条更宽松的旁路。
      */
     const tool = this.deps.registry.get(call.toolName)
-    const verdict = evaluatePreToolUse({
-      toolName: call.toolName,
-      args: call.args,
+    const verdict = this.checkToolCall(
+      state,
       tool,
-      subjectSourceSlug: subjectOf(tool, call.args),
-      workspaceSourceSlugs: state.workspace.sources,
-      activeSourceSlugs: state.activeSourceSlugs,
-      guideRead: (slug) => this.deps.guides.hasRead(sessionId, slug),
-      permissionMode: state.workspace.defaultPermissionMode,
+      call.toolName,
+      call.args,
       // 参数与摘要的一致性已在上方核对过；这里用记录里的摘要做审批绑定比对。
-      paramsHash: call.paramsHash,
+      call.paramsHash,
       approval,
-    })
+    )
 
     this.deps.events.emit({
       sessionId,
@@ -525,7 +522,7 @@ export class PiAgentRunner {
         errorCode: code,
         errorMessage: verdict.reason,
       })
-      return this.outcome(state, { approvalId: approval.id, resumed: true })
+      return this.outcome(state, {})
     }
 
     const transcript = this.deps.transcripts.read(sessionId)
@@ -816,6 +813,34 @@ export class PiAgentRunner {
       }))
   }
 
+  /**
+   * 用当前状态构造一次完整的 PreToolUse 判定。
+   *
+   * 新调用、审批等待唤醒、跨重启恢复都走这同一份逻辑——否则三条路径里迟早
+   * 会有一条忘了检查有效期、边界或 guide。
+   */
+  private checkToolCall(
+    state: RunState,
+    tool: RegisteredTool | undefined,
+    toolName: string,
+    args: Record<string, unknown>,
+    paramsHash: string,
+    approval: Approval | undefined,
+  ): PreToolUseResult {
+    return evaluatePreToolUse({
+      toolName,
+      args,
+      tool,
+      subjectSourceSlug: subjectOf(tool, args),
+      workspaceSourceSlugs: state.workspace.sources,
+      activeSourceSlugs: state.activeSourceSlugs,
+      guideRead: (slug) => this.deps.guides.hasRead(state.session.id, slug),
+      permissionMode: state.workspace.defaultPermissionMode,
+      paramsHash,
+      approval,
+    })
+  }
+
   private async beforeToolCall(
     state: RunState,
     ctx: BeforeToolCallContext,
@@ -852,18 +877,14 @@ export class PiAgentRunner {
       loop: 'pi-agent-core',
     })
 
-    const verdict = evaluatePreToolUse({
-      toolName: call.name,
-      args,
+    const verdict = this.checkToolCall(
+      state,
       tool,
-      subjectSourceSlug: subjectOf(tool, args),
-      workspaceSourceSlugs: state.workspace.sources,
-      activeSourceSlugs: state.activeSourceSlugs,
-      guideRead: (slug) => guides.hasRead(state.session.id, slug),
-      permissionMode: state.workspace.defaultPermissionMode,
+      call.name,
+      args,
       paramsHash,
-      approval: approvals.byToolCall(record.id),
-    })
+      approvals.byToolCall(record.id),
+    )
 
     emit(EventType.PermissionDecided, {
       toolCallId: record.id,
@@ -936,7 +957,37 @@ export class PiAgentRunner {
         return { block: true, reason: state.denied.message }
       }
 
-      // 批准：回到取数态，继续同一次调用。
+      // 批准：等待期间审批可能已过期/被吊销，工具版本或 Source 授权也可能变。
+      // 执行前用同一份判定链再核对一次，而不是相信「刚才的结果」。
+      const granted = approvals.byToolCall(record.id)
+      const recheck = this.checkToolCall(state, tool, call.name, args, paramsHash, granted)
+      emit(EventType.PermissionDecided, {
+        toolCallId: record.id,
+        toolName: call.name,
+        effect: recheck.effect,
+        code: recheck.code ?? null,
+        reason: recheck.reason,
+        checkedBy: recheck.checkedBy,
+        approvalId: granted?.id ?? created.id,
+        recheckedAfterApproval: true,
+      })
+
+      if (recheck.effect !== 'allow') {
+        const code = recheck.code ?? ErrorCode.APPROVAL_INVALID
+        toolCalls.finish(record.id, 'denied', { denyCode: code, denyReason: recheck.reason })
+        emit(EventType.ToolCallFailed, {
+          toolCallId: record.id,
+          toolName: call.name,
+          status: 'denied',
+          code,
+          reason: recheck.reason,
+        })
+        state.denied = { code, message: recheck.reason }
+        state.agent?.abort()
+        return { block: true, reason: recheck.reason }
+      }
+
+      // 批准且复核通过：回到取数态，继续同一次调用。
       state.session = this.transition(state, SessionState.FETCHING, {
         errorCode: null,
         errorMessage: null,
@@ -1083,7 +1134,11 @@ export class PiAgentRunner {
           guideRead:
             tool.kind === 'builtin' || this.deps.guides.hasRead(state.session.id, tool.sourceSlug),
         })),
-      activeSourceSlugs: state.activeSourceSlugs,
+      // 与 legacy 一致：只把「模型真的能调」的 Source 写进提示词，
+      // 发布源保留在激活集合里供 confirmPublish 使用。
+      activeSourceSlugs: state.activeSourceSlugs.filter((slug) =>
+        this.deps.registry.bySource(slug).some(isAgentCallableTool),
+      ),
       history: [],
     }
   }
@@ -1149,8 +1204,6 @@ export class PiAgentRunner {
       reportId?: string | null
       draftVersion?: string | null
       artifactPath?: string | null
-      approvalId?: string | null
-      resumed?: boolean
     },
   ): RunOutcome {
     return {
@@ -1165,8 +1218,8 @@ export class PiAgentRunner {
       artifactPath: patch.artifactPath ?? null,
       stoppedAtIndex: state.denied || state.fatal ? state.step - 1 : null,
       stoppedAtTool: state.denied || state.fatal ? state.lastTool : null,
-      approvalId: patch.approvalId ?? null,
-      resumed: patch.resumed ?? false,
+      approvalId: null,
+      resumed: false,
     }
   }
 }

@@ -76,7 +76,8 @@ describe('发布网关：投递前复核文件', () => {
 
   it('文件字节被替换后拒绝投递', async () => {
     const args = baseArgs()
-    writeFileSync(artifactPath, 'tampered-bytes', 'utf8')
+    // 等长替换：只有 sha256 能发现，sizeBytes 检查发现不了。
+    writeFileSync(artifactPath, 'report-bytes-v2', 'utf8')
     await expectCode(args, ErrorCode.APPROVAL_PARAMS_DRIFT)
   })
 
@@ -87,6 +88,18 @@ describe('发布网关：投递前复核文件', () => {
   it('fileName 带路径分隔符时拒绝投递', async () => {
     await expectCode(baseArgs({ fileName: '../evil.xlsx' }), ErrorCode.SCHEMA_INVALID)
     await expectCode(baseArgs({ fileName: 'sub/evil.xlsx' }), ErrorCode.SCHEMA_INVALID)
+  })
+
+  it('fileName 是 Windows 保留名/数据流/结尾点号时拒绝投递', async () => {
+    await expectCode(baseArgs({ fileName: 'NUL' }), ErrorCode.SCHEMA_INVALID)
+    await expectCode(baseArgs({ fileName: 'COM1.xlsx' }), ErrorCode.SCHEMA_INVALID)
+    await expectCode(baseArgs({ fileName: 'report.xlsx:stream' }), ErrorCode.SCHEMA_INVALID)
+    await expectCode(baseArgs({ fileName: 'report.xlsx.' }), ErrorCode.SCHEMA_INVALID)
+  })
+
+  it('reportId 带路径分隔符时拒绝投递', async () => {
+    await expectCode(baseArgs({ reportId: '../../evil' }), ErrorCode.SCHEMA_INVALID)
+    await expectCode(baseArgs({ reportId: 'sub/evil' }), ErrorCode.SCHEMA_INVALID)
   })
 
   it('artifactPath 越出产物目录时拒绝投递', async () => {
@@ -100,6 +113,33 @@ describe('发布网关：投递前复核文件', () => {
         sha256: createHash('sha256').update(bytes).digest('hex'),
       },
       ErrorCode.SCHEMA_INVALID,
+    )
+  })
+
+  it('产物目录内以 .. 开头的合法子目录不会被误杀', async () => {
+    const dir = join(temp.paths.artifacts, '..cache')
+    mkdirSync(dir, { recursive: true })
+    const path = join(dir, 'report.xlsx')
+    writeFileSync(path, CONTENT, 'utf8')
+    const bytes = readFileSync(path)
+
+    const result = await publishGatewayHandlers.publish_report!(
+      baseArgs({
+        reportId: 'rpt_dotdot_cache',
+        artifactPath: path,
+        sha256: createHash('sha256').update(bytes).digest('hex'),
+      }),
+      { options: { file: receiptsFile }, paths: temp.paths },
+    )
+    expect((result.data as { receiptId: string }).receiptId).toBeTruthy()
+  })
+
+  it('artifactPath 指向目录时按文件不可读处理', async () => {
+    const dir = join(temp.paths.artifacts, 'a-directory')
+    mkdirSync(dir, { recursive: true })
+    await expectCode(
+      baseArgs({ artifactPath: dir }),
+      ErrorCode.APPROVAL_PARAMS_DRIFT,
     )
   })
 
