@@ -12,11 +12,15 @@ type HttpConfig = Extract<SourceConfig, { type: 'http' }>
  * 挂在 `/api/v1` 下的真实企业网关会因此全部 404。
  */
 export function buildToolUrl(baseUrl: string, toolPath: string, toolName: string): string {
-  const base = new URL(baseUrl)
   const path = toolPath.replaceAll('{tool}', toolName)
+  // 绝对 URL 的 toolPath 仍然支持：它优先于 baseUrl，和 new URL(absolute, base) 语义一致。
+  if (/^https?:\/\//i.test(path)) return path
+
+  const base = new URL(baseUrl)
   const prefix = base.pathname.replace(/\/+$/, '')
   const suffix = path.replace(/^\/+/, '')
-  return new URL(`${prefix}/${suffix}`, base.origin).toString()
+  // 用 base 而不是 base.origin 做基准：相对路径会继承 baseUrl 里的 userinfo。
+  return new URL(`${prefix}/${suffix}`, base).toString()
 }
 
 /**

@@ -36,6 +36,8 @@ export interface EmitInput {
  */
 export class EventStore {
   private readonly seqCache = new Map<string, number>()
+  /** 预编译的原子插入语句；emit 在热路径上，不能每条事件都重新 prepare。 */
+  private insertStmt: Database.Statement | null = null
   /** JSONL 追加失败的次数。非零说明审计导出落后于库，需要重建。 */
   private jsonlFailures = 0
 
@@ -77,13 +79,12 @@ export class EventStore {
        * 产生重复序号；SQLite 的写锁保证这条语句串行执行，读到的最大值
        * 一定是上一条已提交事件。`RETURNING seq` 顺便把分配到的序号取回来。
        */
-      const row = this.sqlite
-        .prepare(
-          `INSERT INTO event (event_id, session_id, trace_id, seq, event_type, payload, timestamp)
-           VALUES (?, ?, ?, (SELECT COALESCE(MAX(seq), 0) + 1 FROM event WHERE session_id = ?), ?, ?, ?)
-           RETURNING seq`,
-        )
-        .get(
+      this.insertStmt ??= this.sqlite.prepare(
+        `INSERT INTO event (event_id, session_id, trace_id, seq, event_type, payload, timestamp)
+         VALUES (?, ?, ?, (SELECT COALESCE(MAX(seq), 0) + 1 FROM event WHERE session_id = ?), ?, ?, ?)
+         RETURNING seq`,
+      )
+      const row = this.insertStmt.get(
           eventId,
           input.sessionId,
           input.traceId,

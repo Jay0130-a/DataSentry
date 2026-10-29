@@ -125,7 +125,8 @@ describe('恢复扫描：把残局分类清楚', () => {
       .prepare('UPDATE approval SET expires_at = ? WHERE id = ?')
       .run(new Date(Date.now() - 60_000).toISOString(), approval.id)
 
-    // scan 是只读的，不会替我们把 pending 改成 expired；recover 才会。
+    // scan 不写库，但预览也要看到「已过期」；recover 会真正落库。
+    expect(actionOf(session.id)).toBe('apply-denial')
     const result = await ctx.runRecovery({ execute: false, sessionIds: [session.id] })
     expect(result.findings[0]?.action).toBe('apply-denial')
   })

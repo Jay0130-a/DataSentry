@@ -14,7 +14,7 @@ import { isoTimestamp, permissionModeSchema } from './common.ts'
  * 这样换数据源改配置，改口径才会动代码。
  */
 export const metricInputRuleSchema = z.object({
-  /** 工具引用：`<sourceSlug>.<toolName>`，例如 `erp.fetch_revenue`。 */
+  /** 工具引用：`<sourceSlug>.<toolName>`，例如 `erp.fetch_revenue`. */
   tool: z
     .string()
     .regex(/^[a-z][a-z0-9-]*\.[a-z][a-z0-9_]*$/, 'tool 需形如 erp.fetch_revenue'),
@@ -24,7 +24,17 @@ export const metricInputRuleSchema = z.object({
   sum: z.string().min(1).optional(),
 })
 
-export const workspaceSchema = z.object({
+/** 时区拼错时 `Intl` 会抛 RangeError；在配置边界就拒绝，而不是运行时退回 UTC。 */
+function isValidTimeZone(value: string): boolean {
+  try {
+    new Intl.DateTimeFormat('en-US', { timeZone: value })
+    return true
+  } catch {
+    return false
+  }
+}
+
+const workspaceObjectSchema = z.object({
   id: z.string().min(1),
   name: z.string().min(1),
   /** 允许使用哪些 Source（slug 列表）。跨此列表的访问一律 DENY。 */
@@ -49,7 +59,29 @@ export const workspaceSchema = z.object({
    */
   imTargets: z
     .record(z.string(), z.object({ credentialKey: z.string().min(1) }))
-    .default({}),
+    .default({})
+    .superRefine((targets, ctx) => {
+      const seen = new Map<string, string>()
+      for (const key of Object.keys(targets)) {
+        if (key !== key.trim()) {
+          ctx.addIssue({
+            code: 'custom',
+            message: `imTargets 的键不能有首尾空白："${key}"`,
+          })
+          continue
+        }
+        const normalized = key.toLowerCase()
+        const previous = seen.get(normalized)
+        if (previous !== undefined) {
+          ctx.addIssue({
+            code: 'custom',
+            message: `imTargets 的键不能只靠大小写区分："${previous}" 与 "${key}"`,
+          })
+          continue
+        }
+        seen.set(normalized, key)
+      }
+    }),
   /**
    * 审批资格：哪类审批需要哪些角色。
    *
@@ -85,11 +117,23 @@ export const workspaceSchema = z.object({
   createdAt: isoTimestamp,
 })
 
+export const workspaceSchema = workspaceObjectSchema.refine(
+  (workspace) => isValidTimeZone(workspace.timezone),
+  {
+    message: 'timezone 必须是合法的 IANA 时区（例如 Asia/Shanghai）',
+    path: ['timezone'],
+  },
+)
+
 export type Workspace = z.infer<typeof workspaceSchema>
 
 /** 磁盘上的 workspace.json 形态（`id`/`createdAt` 由加载器补齐）。 */
-export const workspaceFileSchema = workspaceSchema
+export const workspaceFileSchema = workspaceObjectSchema
   .omit({ id: true, createdAt: true })
   .extend({ id: z.string().min(1).optional() })
+  .refine((workspace) => isValidTimeZone(workspace.timezone), {
+    message: 'timezone 必须是合法的 IANA 时区（例如 Asia/Shanghai）',
+    path: ['timezone'],
+  })
 
 export type WorkspaceFile = z.infer<typeof workspaceFileSchema>

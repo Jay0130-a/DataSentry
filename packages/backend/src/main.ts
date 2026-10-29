@@ -1,5 +1,14 @@
 import { createAppContext } from './context.ts'
+import { loadLocalEnv } from './env.ts'
 import { buildServer } from './server/app.ts'
+
+function parsePort(raw: string | undefined): number {
+  const port = Number(raw ?? 3000)
+  if (!Number.isInteger(port) || port < 1 || port > 65535) {
+    throw new Error(`PORT 不是合法端口：${JSON.stringify(raw)}`)
+  }
+  return port
+}
 
 /**
  * 服务入口（PRD §10 的 Console 交付形态）。
@@ -8,11 +17,12 @@ import { buildServer } from './server/app.ts'
  * 这样服务能秒起，配置有问题的数据源也不会拖住整个进程。
  */
 async function main(): Promise<void> {
+  // 先把 .env 读进来，PORT/HOST 才能从文件生效；createAppContext 内部会再调一次（幂等）。
+  loadLocalEnv()
+  const PORT = parsePort(process.env['PORT'])
+  const HOST = process.env['HOST']?.trim() || '127.0.0.1'
+
   const ctx = await createAppContext()
-  // createAppContext 会加载 .env；PORT/HOST 必须在那之后再读，否则
-  // 写在 .env 里的值会被模块顶层的默认值抢先固定。
-  const PORT = Number(process.env['PORT'] ?? 3000)
-  const HOST = process.env['HOST'] ?? '127.0.0.1'
   const app = buildServer(ctx, { logger: true })
 
   const shutdown = async (signal: string): Promise<void> => {

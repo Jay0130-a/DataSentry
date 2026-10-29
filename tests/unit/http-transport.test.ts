@@ -25,4 +25,16 @@ describe('HTTP 工具 URL 拼接', () => {
       'https://host/api/tools/revenue',
     )
   })
+
+  it('绝对 URL 的 toolPath 优先于 baseUrl', () => {
+    expect(buildToolUrl('https://host/api', 'https://erp.internal/tools/{tool}', 'revenue')).toBe(
+      'https://erp.internal/tools/revenue',
+    )
+  })
+
+  it('保留 baseUrl 里的 userinfo', () => {
+    expect(buildToolUrl('https://user:pass@host/api', '/tools/{tool}', 'revenue')).toBe(
+      'https://user:pass@host/api/tools/revenue',
+    )
+  })
 })

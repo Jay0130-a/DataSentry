@@ -92,7 +92,7 @@ export function registerSessionRoutes(app: FastifyInstance, ctx: AppContext): vo
     }
   })
 
-  /** 事件轨迹。`format=jsonl` 返回原始行，便于与文件比对。 */
+  /** 事件轨迹。`format=jsonl` 返回按 seq 排序的 NDJSON。 */
   app.get('/sessions/:id/events', async (request) => {
     const { id } = request.params as { id: string }
     ctx.sessions.require(id)
@@ -102,7 +102,9 @@ export function registerSessionRoutes(app: FastifyInstance, ctx: AppContext): vo
   app.get('/sessions/:id/events.jsonl', async (request, reply) => {
     const { id } = request.params as { id: string }
     ctx.sessions.require(id)
-    const events = ctx.events.readJsonl(id)
+    // 从状态库读并按 seq 排序，而不是直接透传 JSONL 文件：
+    // 多进程同时追加时文件顺序不保证，库才是唯一事实源。
+    const events = ctx.events.list(id)
     return reply.type('application/x-ndjson').send(events.map((e) => JSON.stringify(e)).join('\n'))
   })
 

@@ -109,16 +109,32 @@ describe('事件轨迹：库是事实源，JSONL 是导出', () => {
 })
 
 describe('多进程序号', () => {
-  it('两个 EventStore 共享同一库时序号不重复', () => {
+  it('两个独立连接共享同一库时序号不重复', () => {
+    temp = tempPaths('datasentry-events-')
+    const firstHandle = openDatabase(temp.paths)
+    const secondHandle = openDatabase(temp.paths)
+    handle = firstHandle
+
+    try {
+      const a = new EventStore(firstHandle.db, temp.paths, undefined, firstHandle.sqlite)
+      const b = new EventStore(secondHandle.db, temp.paths, undefined, secondHandle.sqlite)
+
+      const first = emit(a)
+      const second = emit(b)
+
+      expect(second.seq).toBe(first.seq + 1)
+      expect(new Set([first.seq, second.seq]).size).toBe(2)
+    } finally {
+      secondHandle.close()
+    }
+  })
+
+  it('没有原始句柄时退回进程内缓存', () => {
     temp = tempPaths('datasentry-events-')
     handle = openDatabase(temp.paths)
-    const a = new EventStore(handle.db, temp.paths, undefined, handle.sqlite)
-    const b = new EventStore(handle.db, temp.paths, undefined, handle.sqlite)
+    const store = new EventStore(handle.db, temp.paths)
 
-    const first = emit(a)
-    const second = emit(b)
-
-    expect(second.seq).toBe(first.seq + 1)
-    expect(new Set([first.seq, second.seq]).size).toBe(2)
+    expect(emit(store).seq).toBe(1)
+    expect(emit(store).seq).toBe(2)
   })
 })

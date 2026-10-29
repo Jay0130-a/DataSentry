@@ -80,7 +80,9 @@ export function findImTargetKey(
   name: string,
 ): string | null {
   const lower = name.trim().toLowerCase()
-  return Object.keys(imTargets ?? {}).find((key) => key.toLowerCase() === lower) ?? null
+  return (
+    Object.keys(imTargets ?? {}).find((key) => key.trim().toLowerCase() === lower) ?? null
+  )
 }
 
 /**

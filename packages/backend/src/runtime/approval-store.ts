@@ -246,10 +246,7 @@ export class ApprovalStore {
   ): Approval {
     const current = this.require(id)
     if (current.status !== ApprovalStatus.PENDING) {
-      fail(ErrorCode.APPROVAL_INVALID, `审批 ${id} 已经是 ${current.status}，不能重复决定`, {
-        approvalId: id,
-        status: current.status,
-      })
+      this.failAlreadyDecided(id)
     }
 
     const updated = this.db
@@ -268,14 +265,18 @@ export class ApprovalStore {
       .run()
 
     if (updated.changes === 0) {
-      const latest = this.require(id)
-      fail(ErrorCode.APPROVAL_INVALID, `审批 ${id} 已经是 ${latest.status}，不能重复决定`, {
-        approvalId: id,
-        status: latest.status,
-      })
+      this.failAlreadyDecided(id)
     }
 
     return this.require(id)
+  }
+
+  private failAlreadyDecided(id: string): never {
+    const latest = this.require(id)
+    fail(ErrorCode.APPROVAL_INVALID, `审批 ${id} 已经是 ${latest.status}，不能重复决定`, {
+      approvalId: id,
+      status: latest.status,
+    })
   }
 
   /** 把超期未决的记录标为 expired。返回本次标记的条数。 */

@@ -181,6 +181,24 @@ describe('登录与令牌', () => {
     const result = service.login({ username: 'admin', password: 'datasentry-admin' })
     expect(result.user.username).toBe('admin')
   })
+
+  it('失败表满时不会淘汰活跃账号的锁定状态', () => {
+    const service = setup({ maxFailures: 2, maxFailureEntries: 2 })
+
+    for (let i = 0; i < 2; i += 1) {
+      expect(
+        codeOf(() => service.login({ username: 'admin', password: 'wrong' })),
+      ).toBe(ErrorCode.AUTH_INVALID_CREDENTIALS)
+    }
+
+    // 用随机用户名把表撑满；不能因此把 admin 的锁定条目挤掉。
+    codeOf(() => service.login({ username: 'nobody-1', password: 'wrong' }))
+    codeOf(() => service.login({ username: 'nobody-2', password: 'wrong' }))
+
+    expect(
+      codeOf(() => service.login({ username: 'admin', password: 'datasentry-admin' })),
+    ).toBe(ErrorCode.AUTH_RATE_LIMITED)
+  })
 })
 
 describe('登录审计', () => {
