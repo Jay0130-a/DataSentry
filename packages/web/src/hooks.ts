@@ -5,6 +5,8 @@ export interface AsyncState<T> {
   error: string | null
   loading: boolean
   reload: () => void
+  /** 清空当前数据（会话失效时用，避免旧用户/旧任务继续显示）。 */
+  reset: () => void
 }
 
 /**
@@ -20,6 +22,10 @@ export function useAsync<T>(load: () => Promise<T>, deps: readonly unknown[]): A
   const [nonce, setNonce] = useState(0)
 
   const reload = useCallback(() => setNonce((n) => n + 1), [])
+  const reset = useCallback(() => {
+    setData(null)
+    setError(null)
+  }, [])
 
   useEffect(() => {
     let cancelled = false
@@ -43,7 +49,7 @@ export function useAsync<T>(load: () => Promise<T>, deps: readonly unknown[]): A
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [...deps, nonce])
 
-  return { data, error, loading, reload }
+  return { data, error, loading, reload, reset }
 }
 
 export type Route =

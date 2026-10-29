@@ -657,7 +657,9 @@ async function main(): Promise<void> {
     baseline: diff,
   }
 
-  const pathsWritten = noReport ? null : writeRegressionReport(report, paths)
+  const pathsWritten = noReport
+    ? null
+    : writeRegressionReport(report, paths, caseFilter === undefined)
 
   if (asJson) {
     process.stdout.write(`${JSON.stringify(report, null, 2)}\n`)
@@ -715,7 +717,11 @@ async function main(): Promise<void> {
     process.stdout.write(`合计：${passed} PASS / ${outcomes.length - passed} FAIL\n`)
     if (pathsWritten) {
       process.stdout.write(`报告：${pathsWritten.runPath}\n`)
-      process.stdout.write(`基线：${pathsWritten.latestPath}\n`)
+      process.stdout.write(
+        caseFilter
+          ? '基线：（--case 过滤运行不更新）\n'
+          : `基线：${pathsWritten.latestPath}\n`,
+      )
     } else {
       process.stdout.write('（--no-report：未写出报告）\n')
     }

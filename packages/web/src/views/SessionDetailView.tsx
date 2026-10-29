@@ -125,7 +125,9 @@ export function SessionDetailView({ sessionId }: { sessionId: string }): React.J
   // 发布确认的执行入口是「确认投递」，不是恢复执行：
   // 恢复会把取数循环重放一遍，报表被再算一次，会话状态也会错位。
   const awaitingPublishConfirm =
-    session?.state === 'WAITING_APPROVAL' && latestApproval?.kind === 'publish'
+    session?.state === 'WAITING_APPROVAL' &&
+    latestApproval?.kind === 'publish' &&
+    latestApproval.status === 'granted'
 
   return (
     <div className="stack">
@@ -181,6 +183,15 @@ export function SessionDetailView({ sessionId }: { sessionId: string }): React.J
       >
         {detail.loading && !session ? <Loading what="任务详情" /> : null}
         {detail.error ? <ErrorBox message={detail.error} onRetry={detail.reload} /> : null}
+        {report.error ? (
+          <ErrorBox message={`报表加载失败：${report.error}`} onRetry={report.reload} />
+        ) : null}
+        {approvals.error ? (
+          <ErrorBox message={`审批加载失败：${approvals.error}`} onRetry={approvals.reload} />
+        ) : null}
+        {workspaces.error ? (
+          <ErrorBox message={`Workspace 加载失败：${workspaces.error}`} onRetry={workspaces.reload} />
+        ) : null}
         {actionError ? <ErrorBox message={actionError} /> : null}
         {reconcileResult ? <div className="callout callout-ok">{reconcileResult}</div> : null}
         {awaitingPublishConfirm ? (

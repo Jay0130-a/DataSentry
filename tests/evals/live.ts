@@ -121,6 +121,7 @@ async function runOnce(
   })
 
   const started = Date.now()
+  let timedOut = false
   try {
     const session = ctx.createSession({
       workspace: testCase.workspace,
@@ -128,7 +129,24 @@ async function runOnce(
       input: testCase.input,
     })
 
-    await withTimeout(ctx.runSession(session.id), options.timeoutMs, `${testCase.id} 运行`)
+    const runPromise = ctx.runSession(session.id)
+    try {
+      await withTimeout(runPromise, options.timeoutMs, `${testCase.id} 运行`)
+    } catch (err) {
+      /*
+       * 超时只代表「我们不等了」，不代表任务已经停下。此时关掉 SQLite/MCP
+       * 会把它脚下的资源抽走，并可能留下未处理拒绝。让任务自己收敛，
+       * 收敛后再清理这一份临时目录。
+       */
+      timedOut = true
+      void runPromise
+        .catch(() => {})
+        .finally(async () => {
+          await ctx.close().catch(() => {})
+          temp.cleanup()
+        })
+      throw err
+    }
 
     const finalSession = ctx.sessions.require(session.id)
     const report = ctx.reports.bySession(session.id)
@@ -153,8 +171,10 @@ async function runOnce(
       },
     }
   } finally {
-    await ctx.close()
-    temp.cleanup()
+    if (!timedOut) {
+      await ctx.close()
+      temp.cleanup()
+    }
   }
 }
 

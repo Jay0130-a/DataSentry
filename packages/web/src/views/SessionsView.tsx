@@ -113,13 +113,17 @@ function NewRequestCard({ onCreated }: { onCreated: () => void }): React.JSX.Ele
     try {
       const session = await api.createSession({ workspace: selected, request: request.trim() })
       setNotice(`已创建 ${session.id}，期间 ${String(session.input['period'] ?? '?')}`)
-
-      if (autoRun) {
-        await api.runSession(session.id)
-      }
       setRequest('')
       onCreated()
+
+      // 创建成功后立刻离开表单：自动执行失败时，详情页会显示 INIT 和「执行」按钮，
+      // 重试是重新执行同一个 Session，而不是再创建一条。
       navigate(`#/sessions/${session.id}`)
+      if (autoRun) {
+        await api.runSession(session.id).catch(() => {
+          // 失败原因由详情页的状态/操作错误呈现，这里不再弹一个已经离开页面的提示。
+        })
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
     } finally {

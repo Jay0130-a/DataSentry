@@ -63,6 +63,10 @@ export function validateReport(input: ValidationInput): ValidationOutcome {
     }
   }
 
+  // 这里统计的是**本次实际取过数的 Source**，不是 metrics.inputs 里出现的 Source。
+  // monthly-crosscheck 的 reporting-db 结果用于人工核对、不进入指标公式，
+  // 但它确实构成第二个数据源；按 metrics.inputs 统计会把这条正常路径判失败。
+  // 真正的「指标输入是否跨源」需要单独配置，留待后续。
   const sourcesUsed = new Set(input.results.map((r) => r.sourceRef.slug))
   if (sourcesUsed.size < 2) {
     failures.push(

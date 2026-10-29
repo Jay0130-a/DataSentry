@@ -132,13 +132,24 @@ function sumByField(raw: unknown, field: string): number | undefined {
 function resolveInput(
   results: readonly ToolResult[],
   rule: MetricInputRule | undefined,
+  warnings: string[],
 ): ResolvedInput | undefined {
   if (!rule) return undefined
 
   const [slug, tool] = rule.tool.split('.')
   if (!slug || !tool) return undefined
 
-  const result = results.find((item) => item.toolName === buildToolName(slug, tool))
+  const expected = buildToolName(slug, tool)
+  const matches = results.filter((item) => item.toolName === expected)
+  if (matches.length > 1) {
+    // 同一工具被调用多次（不同期间/事业部）时，指标输入无法确定该用哪一条；
+    // 静默取第一条会让报表看起来正常，实际却可能用了另一个期间的数据。
+    warnings.push(
+      `指标输入 ${rule.tool} 匹配到 ${matches.length} 条结果，无法确定使用哪一条`,
+    )
+    return undefined
+  }
+  const result = matches[0]
   if (!result) return undefined
 
   const raw = readPath(result.data, rule.field)
@@ -171,15 +182,15 @@ export function computeMetrics(
   results: readonly ToolResult[],
   inputs: MetricInputs = DEFAULT_METRIC_INPUTS,
 ): MetricsResult {
-  const revenue = resolveInput(results, inputs.revenue)
-  const cost = resolveInput(results, inputs.cost)
-  const budget = resolveInput(results, inputs.budgetRevenue)
-  const warehouseRevenue = resolveInput(results, inputs.warehouseRevenue)
-  const orderCount = resolveInput(results, inputs.orderCount)
-  const adjustment = resolveInput(results, inputs.adjustment)
+  const warnings: string[] = []
+  const revenue = resolveInput(results, inputs.revenue, warnings)
+  const cost = resolveInput(results, inputs.cost, warnings)
+  const budget = resolveInput(results, inputs.budgetRevenue, warnings)
+  const warehouseRevenue = resolveInput(results, inputs.warehouseRevenue, warnings)
+  const orderCount = resolveInput(results, inputs.orderCount, warnings)
+  const adjustment = resolveInput(results, inputs.adjustment, warnings)
 
   const drafts: Draft[] = []
-  const warnings: string[] = []
 
   if (revenue) {
     drafts.push({
