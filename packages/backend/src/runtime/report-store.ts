@@ -1,4 +1,4 @@
-import { eq } from 'drizzle-orm'
+import { desc, eq } from 'drizzle-orm'
 import { ErrorCode, fail, type Report } from '@datasentry/core'
 import { schema, type Db } from '../db/index.ts'
 
@@ -82,6 +82,9 @@ export class ReportStore {
       .select()
       .from(schema.reports)
       .where(eq(schema.reports.sessionId, sessionId))
+      // 重试会写第二份草稿；按创建时间倒序，拿到的必须是最新那一份，
+      // 否则页面/发布/CLI 会继续引用旧版本的指标。
+      .orderBy(desc(schema.reports.createdAt))
       .all()[0]
     return row ? toReport(row) : undefined
   }

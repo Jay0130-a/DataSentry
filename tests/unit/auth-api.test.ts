@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import type { FastifyInstance } from 'fastify'
-import { hashValue } from '@datasentry/core'
+import { hashValue, SessionState } from '@datasentry/core'
 import { hashPassword } from '@datasentry/backend/auth/password.ts'
 import { createAppContext, type AppContext } from '@datasentry/backend/context.ts'
 import { buildServer } from '@datasentry/backend/server/app.ts'
@@ -88,6 +88,38 @@ describe('HTTP 鉴权', () => {
 
     expect(response.statusCode).toBe(403)
     expect(JSON.parse(response.body).error.code).toBe('FORBIDDEN')
+  })
+
+  it('管理员可以处置人工复核任务，非法 body 返回 400', async () => {
+    const cookie = await loginAs('admin', 'admin-pass')
+    const session = ctx.createSession({
+      workspace: 'group-finance',
+      request: '出 2025-09 的经营月报',
+      input: { period: '2025-09' },
+    })
+    ctx.sessions.transition(session.id, 0, SessionState.PLANNING)
+    ctx.sessions.transition(session.id, 1, SessionState.FETCHING)
+    ctx.sessions.transition(session.id, 2, SessionState.COMPUTING)
+    ctx.sessions.transition(session.id, 3, SessionState.VALIDATING)
+    ctx.sessions.transition(session.id, 4, SessionState.MANUAL_REVIEW)
+
+    const response = await app.inject({
+      method: 'POST',
+      url: `/sessions/${session.id}/review`,
+      headers: { cookie },
+      payload: { resolution: 'block', reason: '等待人工确认' },
+    })
+    expect(response.statusCode, response.body).toBe(200)
+    expect(JSON.parse(response.body).session.state).toBe('BLOCKED')
+
+    const invalid = await app.inject({
+      method: 'POST',
+      url: `/sessions/${session.id}/review`,
+      headers: { cookie },
+      payload: { resolution: 'maybe', reason: 'x' },
+    })
+    expect(invalid.statusCode).toBe(400)
+    expect(JSON.parse(invalid.body).error.code).toBe('SCHEMA_INVALID')
   })
 
   it('管理员可以访问数据源清单', async () => {

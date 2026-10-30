@@ -84,10 +84,11 @@ describe('MANUAL_REVIEW 人工处置', () => {
     ).toBe(ErrorCode.VALIDATION_FAILED)
   })
 
-  it('有草稿产物时 accept → DONE', async () => {
+  it('有草稿产物时 accept → DONE，并把报表标记为 confirmed', async () => {
     const session = newSession()
     await ctx.runSession(session.id)
-    expect(ctx.reports.bySession(session.id)).toBeDefined()
+    const report = ctx.reports.bySession(session.id)
+    expect(report).toBeDefined()
     // 正常链路走不到 MANUAL_REVIEW；直接改库模拟人工复核状态。
     ctx.database.sqlite
       .prepare('UPDATE session SET state = ? WHERE id = ?')
@@ -98,6 +99,39 @@ describe('MANUAL_REVIEW 人工处置', () => {
       reason: '人工核对通过',
     })
     expect(updated.state).toBe(SessionState.DONE)
+    expect(ctx.reports.require(report!.id).status).toBe('confirmed')
+  })
+
+  it('retry 会结束悬挂调用并吊销未决审批', () => {
+    const session = manualReviewSession()
+    const args = { period: '2025-09' }
+    const call = ctx.toolCalls.create({
+      sessionId: session.id,
+      step: 0,
+      toolName: 'mcp__erp__fetch_revenue',
+      sourceSlug: 'erp',
+      paramsHash: 'h',
+      toolVersion: 'v-test',
+      args,
+    })
+    const approval = ctx.approvals.create({
+      sessionId: session.id,
+      workspaceId: 'group-finance',
+      toolCallId: call.id,
+      toolName: call.toolName,
+      toolVersion: call.toolVersion,
+      paramsHash: call.paramsHash,
+      kind: 'tool-call',
+    })
+
+    const updated = ctx.resolveManualReview(session.id, {
+      resolution: 'retry',
+      reason: '重新跑',
+    })
+
+    expect(updated.state).toBe(SessionState.PAUSED)
+    expect(ctx.toolCalls.require(call.id).status).toBe('denied')
+    expect(ctx.approvals.require(approval.id).status).toBe('revoked')
   })
 
   it('非 MANUAL_REVIEW 任务不能人工处置', () => {

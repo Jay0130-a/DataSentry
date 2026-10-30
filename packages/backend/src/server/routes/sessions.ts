@@ -100,9 +100,12 @@ export function registerSessionRoutes(app: FastifyInstance, ctx: AppContext): vo
   /** 管理员处置 MANUAL_REVIEW：retry / accept / fail / block。 */
   app.post('/sessions/:id/review', async (request) => {
     const { id } = request.params as { id: string }
-    requireUser(request)
+    const user = requireUser(request)
     const input = manualReviewInputSchema.parse(request.body ?? {})
-    const session = ctx.resolveManualReview(id, input)
+    const session = ctx.resolveManualReview(id, input, {
+      userId: user.id,
+      displayName: user.displayName,
+    })
     return {
       session: serializeSession(
         session,

@@ -158,7 +158,11 @@ export interface AppContext {
    * 状态机只允许 MANUAL_REVIEW → PAUSED / READY / DONE / BLOCKED / FAILED；
    * 这里不自动执行任何工具，只把人工结论落到状态并写事件。
    */
-  resolveManualReview(sessionId: string, input: ManualReviewInput): Session
+  resolveManualReview(
+    sessionId: string,
+    input: ManualReviewInput,
+    actor?: { userId?: string; displayName?: string },
+  ): Session
   /** 发起发布确认（前置校验 + 渲染文件 + 绑定草稿版本、接收人、格式）。 */
   requestPublish(
     reportId: string,
@@ -654,7 +658,11 @@ export async function createAppContext(options: AppContextOptions = {}): Promise
       return makeRunner({ sessionId, ...(options.plan ? { plan: options.plan } : {}) }).run(sessionId)
     },
 
-    resolveManualReview(sessionId: string, input: ManualReviewInput): Session {
+    resolveManualReview(
+      sessionId: string,
+      input: ManualReviewInput,
+      actor?: { userId?: string; displayName?: string },
+    ): Session {
       const session = sessions.require(sessionId)
       if (session.state !== SessionState.MANUAL_REVIEW) {
         fail(
@@ -664,8 +672,35 @@ export async function createAppContext(options: AppContextOptions = {}): Promise
         )
       }
 
+      /*
+       * 离开 MANUAL_REVIEW 之前先把现场收干净：
+       * - 悬挂调用标记为中断，恢复/重试不会重放一个结果未知的调用；
+       * - 所有未决审批吊销，关闭后的任务不能再被「确认投递」。
+       */
+      for (const call of toolCalls.pendingBySession(sessionId)) {
+        toolCalls.finish(call.id, 'denied', {
+          denyCode: ErrorCode.EXECUTION_INTERRUPTED,
+          denyReason: `人工复核处置：${input.reason}`,
+        })
+        events.emit({
+          sessionId,
+          traceId: session.traceId,
+          type: EventType.ToolCallFailed,
+          payload: {
+            toolCallId: call.id,
+            toolName: call.toolName,
+            status: 'denied',
+            code: ErrorCode.EXECUTION_INTERRUPTED,
+            reason: `人工复核处置：${input.reason}`,
+          },
+        })
+      }
+      approvals.revokeAll(sessionId)
+
       let to: SessionState
+      let errorCode: string | null = null
       let errorMessage: string | null = null
+      let reportConfirmed = false
       switch (input.resolution) {
         case 'retry':
           // PAUSED 是恢复入口的起点；这里不自动执行，避免接口长时间阻塞。
@@ -681,21 +716,29 @@ export async function createAppContext(options: AppContextOptions = {}): Promise
               { sessionId },
             )
           }
+          // 接受草稿意味着它不再是「待发布草稿」；标记 confirmed，
+          // 避免详情页继续显示一个点了必然失败的「发起发布」。
+          if (report.status === 'draft') {
+            reports.patch(report.id, { status: 'confirmed' })
+            reportConfirmed = true
+          }
           to = SessionState.DONE
           break
         }
         case 'fail':
           to = SessionState.FAILED
+          errorCode = ErrorCode.MANUAL_REVIEW_FAILED
           errorMessage = input.reason
           break
         case 'block':
           to = SessionState.BLOCKED
+          errorCode = ErrorCode.MANUAL_REVIEW_BLOCKED
           errorMessage = input.reason
           break
       }
 
       const updated = sessions.transition(session.id, session.stateVersion, to, {
-        errorCode: null,
+        errorCode,
         errorMessage,
       })
       events.emit({
@@ -707,6 +750,9 @@ export async function createAppContext(options: AppContextOptions = {}): Promise
           to,
           reason: `manual-review:${input.resolution}`,
           detail: input.reason,
+          actorId: actor?.userId ?? null,
+          actorName: actor?.displayName ?? null,
+          reportConfirmed,
         },
       })
       return updated

@@ -319,7 +319,7 @@ export const api = {
     id: string,
     input: { resolution: 'retry' | 'accept' | 'fail' | 'block'; reason: string },
   ) =>
-    request<{ session: SessionDetail; resolution: string }>(`/sessions/${id}/review`, {
+    request<{ session: SessionSummary; resolution: string }>(`/sessions/${id}/review`, {
       method: 'POST',
       body: JSON.stringify(input),
     }),

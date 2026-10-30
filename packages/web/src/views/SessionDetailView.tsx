@@ -260,6 +260,8 @@ export function SessionDetailView({
         ) : null}
         {actionError ? <ErrorBox message={actionError} /> : null}
         {reconcileResult ? <div className="callout callout-ok">{reconcileResult}</div> : null}
+        {reviewError ? <ErrorBox message={reviewError} /> : null}
+        {reviewMsg ? <div className="callout callout-ok">{reviewMsg}</div> : null}
         {awaitingPublishConfirm ? (
           <div className="callout">
             发布确认已通过。投递的执行入口是下方审批表里的「确认投递」——那一步会重新核对文件字节、
@@ -330,7 +332,7 @@ export function SessionDetailView({
         >
           {user.role !== 'admin' ? (
             <div className="callout">
-              需要管理员身份处置；请联系管理员在恢复页或 CLI 执行。
+              需要管理员身份处置；请让管理员在任务详情页或使用 CLI `sessions review` 执行。
             </div>
           ) : (
             <div className="stack">
@@ -345,7 +347,7 @@ export function SessionDetailView({
                 <button
                   type="button"
                   className="btn"
-                  disabled={reviewBusy}
+                  disabled={reviewBusy || loadError}
                   onClick={() => void resolveReview('retry')}
                 >
                   重试（转 PAUSED）
@@ -353,7 +355,8 @@ export function SessionDetailView({
                 <button
                   type="button"
                   className="btn btn-primary"
-                  disabled={reviewBusy}
+                  disabled={reviewBusy || loadError || !report.data}
+                  title={!report.data ? '没有可接受的报表产物' : undefined}
                   onClick={() => void resolveReview('accept')}
                 >
                   接受当前草稿（DONE）
@@ -361,7 +364,7 @@ export function SessionDetailView({
                 <button
                   type="button"
                   className="btn"
-                  disabled={reviewBusy}
+                  disabled={reviewBusy || loadError}
                   onClick={() => void resolveReview('fail')}
                 >
                   判定失败（FAILED）
@@ -369,14 +372,12 @@ export function SessionDetailView({
                 <button
                   type="button"
                   className="btn"
-                  disabled={reviewBusy}
+                  disabled={reviewBusy || loadError}
                   onClick={() => void resolveReview('block')}
                 >
                   转 BLOCKED
                 </button>
               </div>
-              {reviewError ? <ErrorBox message={reviewError} /> : null}
-              {reviewMsg ? <div className="callout callout-ok">{reviewMsg}</div> : null}
             </div>
           )}
         </Panel>
