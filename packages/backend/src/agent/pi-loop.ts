@@ -552,7 +552,7 @@ export class PiAgentRunner {
       })
     }
 
-    const toolCallId = findPendingToolCallId(transcript, call.toolName)
+    const toolCallId = findPendingToolCallId(transcript, call.toolName, call.args)
     if (!toolCallId) {
       fail(ErrorCode.APPROVAL_INVALID, `对话记录里找不到挂起的工具调用 "${call.toolName}"`, {
         sessionId,
@@ -1312,7 +1312,18 @@ function entityState(session: Session): RunState {
  *
  * 只检查最后一条 assistant：挂起的调用一定是它发出的，之后的 toolResult 还没写。
  */
-function findPendingToolCallId(messages: readonly Message[], toolName: string): string | null {
+function findPendingToolCallId(
+  messages: readonly Message[],
+  toolName: string,
+  args: Record<string, unknown>,
+): string | null {
+  const answered = new Set(
+    messages
+      .filter((message) => message.role === 'toolResult')
+      .map((message) => (message as { toolCallId: string }).toolCallId),
+  )
+  const expected = hashValue(args)
+
   for (let i = messages.length - 1; i >= 0; i -= 1) {
     const message = messages[i]!
     if (message.role !== 'assistant') continue
@@ -1320,8 +1331,16 @@ function findPendingToolCallId(messages: readonly Message[], toolName: string): 
     const calls = message.content.filter((item) => item.type === 'toolCall') as Array<{
       id: string
       name: string
+      arguments?: Record<string, unknown>
     }>
-    const match = [...calls].reverse().find((call) => call.name === toolName)
+    const candidates = calls.filter((call) => call.name === toolName && !answered.has(call.id))
+    if (candidates.length === 0) return null
+
+    // 一条 assistant 消息里可能有多个同名调用；优先按参数摘要匹配，
+    // 匹配不上再退回最后一个候选，保持旧数据的兼容。
+    const match =
+      [...candidates].reverse().find((call) => hashValue(call.arguments ?? {}) === expected) ??
+      candidates[candidates.length - 1]
     return match?.id ?? null
   }
   return null

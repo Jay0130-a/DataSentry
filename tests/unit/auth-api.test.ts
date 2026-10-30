@@ -77,6 +77,13 @@ describe('HTTP 鉴权', () => {
     }
   })
 
+  it('HEAD 请求不能绕过管理员接口', async () => {
+    const cookie = await loginAs('analyst', 'analyst-pass')
+    const response = await app.inject({ method: 'HEAD', url: '/sources', headers: { cookie } })
+
+    expect(response.statusCode).toBe(403)
+  })
+
   it('业务用户不能处置人工复核任务', async () => {
     const cookie = await loginAs('analyst', 'analyst-pass')
     const response = await app.inject({

@@ -554,29 +554,36 @@ export class AuthService {
     }
   }
 
-  /** 只清理已过期的条目；**不**按插入顺序淘汰活跃条目。 */
-  private pruneExpiredFailures(nowMs: number): void {
+  /**
+   * 给新条目腾位置：先清理过期条目，再淘汰**尚未锁定**的最旧条目。
+   *
+   * 已经达到 maxFailures 的条目绝不能淘汰——攻击者用随机用户名把受害者
+   * 刚建立的锁定挤掉，就等于绕过了限流。全部都是锁定条目时宁可不再
+   * 记录新用户名，也不牺牲已有账号的锁定状态。
+   */
+  private makeRoom(nowMs: number): void {
     for (const [username, entry] of this.failures) {
       if (nowMs >= entry.resetAt) this.failures.delete(username)
     }
-    this.lastFailurePruneAt = nowMs
+    if (this.failures.size < this.maxFailureEntries) return
+
+    for (const [username, entry] of this.failures) {
+      if (entry.count < this.maxFailures) {
+        this.failures.delete(username)
+        return
+      }
+    }
   }
 
   private recordFailure(username: string): void {
     const nowMs = this.now().getTime()
 
-    /*
-     * 表满时只清理过期条目，绝不淘汰仍在窗口期内的条目。
-     *
-     * 按插入顺序淘汰会让攻击者用大量随机用户名把受害者刚锁定的条目挤掉，
-     * 受害者的 count 归零后，暴力破解限流就被绕过了。宁可不再记录新的
-     * 随机用户名，也不能牺牲已有账号的锁定状态。
-     */
     if (
       this.failures.size >= this.maxFailureEntries &&
       nowMs - this.lastFailurePruneAt >= 1000
     ) {
-      this.pruneExpiredFailures(nowMs)
+      this.makeRoom(nowMs)
+      this.lastFailurePruneAt = nowMs
     }
 
     const entry = this.failures.get(username)

@@ -53,7 +53,10 @@ const ADMIN_ROUTES: ReadonlySet<string> = new Set([
 export function registerAuthGuard(app: FastifyInstance, ctx: AppContext): void {
   app.addHook('preHandler', async (request) => {
     const route = request.routeOptions.url ?? request.url.split('?')[0] ?? request.url
-    const key = `${request.method} ${route}`
+    // Fastify 默认给每个 GET 暴露 HEAD；HEAD 路由的 url 一样，但 method 不同，
+    // 不归一化就会绕过 ADMIN_ROUTES 的管理员检查。
+    const method = request.method === 'HEAD' ? 'GET' : request.method
+    const key = `${method} ${route}`
     if (PUBLIC_ROUTES.has(key)) return
 
     const token = readSessionToken(request)

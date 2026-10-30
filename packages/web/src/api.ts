@@ -259,7 +259,8 @@ export interface AuthAuditEntry {
 }
 
 export const api = {
-  meta: () => request<{ service: string; model: ModelInfo }>('/meta'),
+  meta: () =>
+    request<{ service: string; model: ModelInfo; agentLoop?: 'legacy' | 'pi' }>('/meta'),
 
   login: (username: string, password: string) =>
     request<{ user: AuthUser; expiresAt: string }>('/auth/login', {

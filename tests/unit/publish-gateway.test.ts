@@ -204,4 +204,11 @@ describe('intent 只在能证明未发出时撤销', () => {
       ),
     ).toBe(true)
   })
+
+  it('fetch 把错误码放在 cause 上也能识别', () => {
+    const err = new TypeError('fetch failed') as TypeError & { cause?: unknown }
+    err.cause = Object.assign(new Error('getaddrinfo ENOTFOUND'), { code: 'ENOTFOUND' })
+    expect(isDefinitelyNotDelivered(err, 'im')).toBe(true)
+    expect(isDefinitelyNotDelivered(err, 'email')).toBe(true)
+  })
 })

@@ -2,7 +2,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { createHash } from 'node:crypto'
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { ApprovalStatus, ErrorCode, isDataSentryError, type Report } from '@datasentry/core'
+import { ApprovalStatus, ErrorCode, isDataSentryError, SessionState, type Report } from '@datasentry/core'
 import { createAppContext, type AppContext } from '@datasentry/backend/context.ts'
 import {
   computeRecipientsHash,
@@ -538,6 +538,25 @@ describe('发布请求取代与幂等', () => {
       () => ctx.decideApproval(approval.id, { decision: 'denied', approver: '财务总监' }),
       ErrorCode.APPROVAL_INVALID,
     )
+  })
+
+  it('READY 会话上已批准的发布确认仍可执行（崩溃窗口）', async () => {
+    const report = await readyReport('2024-05')
+    const { approval } = await ctx.requestPublish(report.id, {
+      recipients: ['board@example.com'],
+      channel: 'email',
+      format: 'xlsx',
+    })
+    ctx.decideApproval(approval.id, { decision: 'granted', approver: '财务总监' })
+
+    // requestPublish 创建审批后、转 WAITING_APPROVAL 前崩溃留下的状态。
+    ctx.database.sqlite
+      .prepare('UPDATE session SET state = ? WHERE id = ?')
+      .run(SessionState.READY, report.sessionId)
+
+    const result = await ctx.confirmPublish(approval.id)
+    expect(result.status).toBe('published')
+    expect(ctx.sessions.require(report.sessionId).state).toBe(SessionState.DONE)
   })
 
   it('重复确认返回 already-published，不重复写投递事件', async () => {

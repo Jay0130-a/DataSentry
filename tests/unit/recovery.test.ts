@@ -278,6 +278,32 @@ describe('恢复死局回归', () => {
     expect(ctx.approvals.require(approval.id).status).toBe(ApprovalStatus.EXPIRED)
   })
 
+  it('多条悬挂调用在 FETCHING 下全部标记中断并转 PAUSED', async () => {
+    const created = newSession()
+    ctx.sessions.transition(created.id, 0, SessionState.PLANNING)
+    ctx.sessions.transition(created.id, 1, SessionState.FETCHING)
+
+    const calls = [0, 1].map((step) =>
+      ctx.toolCalls.create({
+        sessionId: created.id,
+        step,
+        toolName: 'mcp__erp__fetch_revenue',
+        sourceSlug: 'erp',
+        paramsHash: hashValue({ period: '2025-09', step }),
+        toolVersion: 'v-test',
+        args: { period: '2025-09', step },
+      }),
+    )
+
+    const result = await ctx.runRecovery({ execute: false, sessionIds: [created.id] })
+
+    expect(result.errors).toEqual([])
+    expect(ctx.sessions.require(created.id).state).toBe(SessionState.PAUSED)
+    for (const call of calls) {
+      expect(ctx.toolCalls.require(call.id).status).toBe('failed')
+    }
+  })
+
   it('审批已拒绝且调用已结束时，恢复能按 DENIED 收敛而不是空指针', async () => {
     const created = newSession()
     ctx.sessions.transition(created.id, 0, SessionState.PLANNING)

@@ -272,12 +272,19 @@ export class RecoveryService {
     if (isTerminal(session.state)) {
       return decide('skip-terminal', `状态 ${session.state} 已终结，无需处理`)
     }
-    // 恢复和 resume 都要求恰好一条悬挂调用；多条只可能来自历史脏数据，
-    // 猜哪一条都会重放错的调用，交给人工比自动选一条安全。
+    // 多条悬挂调用只可能来自并发批次/历史脏数据。WAITING_APPROVAL 下可以
+    // 转人工复核；其它状态用 mark-interrupted 把全部调用标记为中断后转 PAUSED
+    // （FETCHING/COMPUTING/READY 都允许 → PAUSED，不能一律转 MANUAL_REVIEW）。
     if (pending.length > 1) {
+      if (session.state === SessionState.WAITING_APPROVAL) {
+        return decide(
+          'needs-manual-review',
+          `存在 ${pending.length} 条悬挂工具调用，无法确定该重放哪一条`,
+        )
+      }
       return decide(
-        'needs-manual-review',
-        `存在 ${pending.length} 条悬挂工具调用，无法确定该重放哪一条`,
+        'mark-interrupted',
+        `存在 ${pending.length} 条悬挂工具调用，结果未知；全部标记为中断后转 PAUSED`,
       )
     }
     if (session.state === SessionState.READY) {
@@ -521,25 +528,29 @@ export class RecoveryService {
       }
 
       case 'mark-interrupted': {
-        const callId = finding.pendingToolCall!.id
-        toolCalls.finish(callId, 'failed', {
-          denyCode: ErrorCode.EXECUTION_INTERRUPTED,
-          denyReason: '进程在本次调用执行期间中断，结果未知；恢复时将重新发起',
-        })
-        events.emit({
-          sessionId: session.id,
-          traceId: session.traceId,
-          type: EventType.ToolCallFailed,
-          payload: {
-            toolCallId: callId,
-            toolName: finding.pendingToolCall!.toolName,
-            status: 'failed',
-            code: ErrorCode.EXECUTION_INTERRUPTED,
-            reason: '进程中断，结果未知',
-          },
-        })
+        // 并发批次可能留下多条悬挂调用；全部标记为中断，避免留下
+        // 一条永远处于 pending、又无法被 resume 重放的记录。
+        const interrupted = toolCalls.pendingBySession(session.id)
+        for (const call of interrupted) {
+          toolCalls.finish(call.id, 'failed', {
+            denyCode: ErrorCode.EXECUTION_INTERRUPTED,
+            denyReason: '进程在本次调用执行期间中断，结果未知；恢复时将重新发起',
+          })
+          events.emit({
+            sessionId: session.id,
+            traceId: session.traceId,
+            type: EventType.ToolCallFailed,
+            payload: {
+              toolCallId: call.id,
+              toolName: call.toolName,
+              status: 'failed',
+              code: ErrorCode.EXECUTION_INTERRUPTED,
+              reason: '进程中断，结果未知',
+            },
+          })
+        }
         this.toPaused(session, '进程中断，等待恢复')
-        return '已把中断的调用标记为 EXECUTION_INTERRUPTED，会话转 PAUSED'
+        return `已把 ${interrupted.length} 条中断的调用标记为 EXECUTION_INTERRUPTED，会话转 PAUSED`
       }
 
       case 'continue-from-checkpoint': {
@@ -569,6 +580,7 @@ export class RecoveryService {
   }
 
   private toPaused(session: Session, reason: string): void {
+    if (session.state === SessionState.PAUSED) return
     this.deps.sessions.transition(session.id, session.stateVersion, SessionState.PAUSED, {
       errorCode: null,
       errorMessage: null,

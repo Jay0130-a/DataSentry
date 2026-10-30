@@ -16,6 +16,7 @@ export function registerCatalogRoutes(app: FastifyInstance, ctx: AppContext): vo
   app.get('/meta', async () => ({
     service: 'datasentry',
     model: ctx.model.describe(),
+    agentLoop: ctx.agentLoop,
   }))
 
   app.get('/workspaces', async (request) => {

@@ -182,6 +182,29 @@ describe('登录与令牌', () => {
     expect(result.user.username).toBe('admin')
   })
 
+  it('失败表满后仍能给新账号计数，不会让暴力破解绕过限流', () => {
+    let nowMs = Date.parse('2026-01-01T00:00:00.000Z')
+    const service = setup({
+      maxFailures: 2,
+      maxFailureEntries: 2,
+      windowMs: 60_000,
+      now: () => new Date(nowMs),
+    })
+
+    // 用两个随机用户名把表占满（都还没锁定）
+    codeOf(() => service.login({ username: 'nobody-1', password: 'wrong' }))
+    codeOf(() => service.login({ username: 'nobody-2', password: 'wrong' }))
+
+    // 时间前进，允许清理/淘汰非锁定条目
+    nowMs += 2_000
+    codeOf(() => service.login({ username: 'admin', password: 'wrong' }))
+    codeOf(() => service.login({ username: 'admin', password: 'wrong' }))
+
+    expect(
+      codeOf(() => service.login({ username: 'admin', password: 'datasentry-admin' })),
+    ).toBe(ErrorCode.AUTH_RATE_LIMITED)
+  })
+
   it('失败表满时不会淘汰活跃账号的锁定状态', () => {
     const service = setup({ maxFailures: 2, maxFailureEntries: 2 })
 
