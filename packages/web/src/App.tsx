@@ -61,10 +61,14 @@ export function App(): React.JSX.Element {
 
   // 会话过期或被吊销时，任何一次请求都会触发这个事件，统一回到登录页。
   useEffect(() => {
-    const onUnauthorized = (): void => me.reload()
+    const onUnauthorized = (): void => {
+      // 只 reload 不够：display 的 user 来自旧 data，会继续停在已登录界面。
+      me.reset()
+      me.reload()
+    }
     window.addEventListener('datasentry:unauthorized', onUnauthorized)
     return () => window.removeEventListener('datasentry:unauthorized', onUnauthorized)
-  }, [me.reload])
+  }, [me.reload, me.reset])
 
   if (!user) {
     if (me.loading) {
@@ -91,6 +95,8 @@ export function App(): React.JSX.Element {
     try {
       await api.logout()
     } finally {
+      // /auth/me 的 401 被 api.ts 排除在 unauthorized 事件之外，只 reload 会保留旧 user。
+      me.reset()
       me.reload()
     }
   }
@@ -147,8 +153,12 @@ export function App(): React.JSX.Element {
         {denied ? <NoAccess route={route} /> : null}
 
         {!denied && route.name === 'sessions' && <SessionsView />}
-        {!denied && route.name === 'session' && <SessionDetailView sessionId={route.id} />}
-        {!denied && route.name === 'session-events' && <EventsView sessionId={route.id} />}
+        {!denied && route.name === 'session' && (
+          <SessionDetailView key={route.id} sessionId={route.id} />
+        )}
+        {!denied && route.name === 'session-events' && (
+          <EventsView key={route.id} sessionId={route.id} />
+        )}
         {!denied && route.name === 'approvals' && <ApprovalsView user={user} />}
         {!denied && route.name === 'recovery' && <RecoveryView />}
         {!denied && route.name === 'sources' && <SourcesView />}

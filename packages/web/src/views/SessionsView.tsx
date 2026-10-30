@@ -113,12 +113,13 @@ function NewRequestCard({ onCreated }: { onCreated: () => void }): React.JSX.Ele
     try {
       const session = await api.createSession({ workspace: selected, request: request.trim() })
       setNotice(`已创建 ${session.id}，期间 ${String(session.input['period'] ?? '?')}`)
-
-      if (autoRun) {
-        await api.runSession(session.id)
-      }
       setRequest('')
       onCreated()
+
+      // 创建成功后立刻离开表单；自动执行交给详情页，避免它先加载到 INIT 快照。
+      if (autoRun) {
+        sessionStorage.setItem(`datasentry:autorun:${session.id}`, '1')
+      }
       navigate(`#/sessions/${session.id}`)
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))

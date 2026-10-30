@@ -4,6 +4,7 @@ import {
   dataPaths,
   ErrorCode,
   fail,
+  isSafePathSegment,
   workspaceFileSchema,
   type DataPaths,
   type Workspace,
@@ -22,6 +23,7 @@ export interface LoadedWorkspace extends Workspace {
  * 因为把两者混为一谈是这类系统最常见的越权来源。
  */
 export function loadWorkspace(ref: string, paths: DataPaths = dataPaths()): LoadedWorkspace {
+  assertSafeWorkspaceRef(ref)
   const file = resolveWorkspaceFile(ref, paths)
   const parsed = JSON.parse(readFileSync(file, 'utf8')) as unknown
   const result = workspaceFileSchema.safeParse(parsed)
@@ -38,6 +40,13 @@ export function loadWorkspace(ref: string, paths: DataPaths = dataPaths()): Load
     id: result.data.id ?? ref,
     createdAt: new Date().toISOString(),
     path: file,
+  }
+}
+
+/** Workspace 引用只能是 `workspaces/` 下的一级目录名，不能是路径。 */
+function assertSafeWorkspaceRef(ref: string): void {
+  if (!isSafePathSegment(ref)) {
+    fail(ErrorCode.WORKSPACE_NOT_FOUND, `非法的 Workspace 引用 "${ref}"`, { workspace: ref })
   }
 }
 

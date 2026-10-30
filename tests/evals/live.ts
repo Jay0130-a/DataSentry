@@ -90,6 +90,19 @@ function readEvents(paths: DataPaths, sessionId: string): AgentEvent[] {
     .map((line) => JSON.parse(line) as AgentEvent)
 }
 
+class LiveTimeoutError extends Error {}
+
+/** 超时任务收敛后再清理；进程退出前给它们一个有限的等待窗口。 */
+const pendingCleanups: Promise<void>[] = []
+
+async function drainPendingCleanups(timeoutMs = 5_000): Promise<void> {
+  if (pendingCleanups.length === 0) return
+  await Promise.race([
+    Promise.allSettled(pendingCleanups),
+    new Promise<void>((resolve) => setTimeout(resolve, timeoutMs)),
+  ])
+}
+
 async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, label: string): Promise<T> {
   let timer: NodeJS.Timeout | undefined
   try {
@@ -97,7 +110,7 @@ async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, label: str
       promise,
       new Promise<never>((_, reject) => {
         timer = setTimeout(
-          () => reject(new Error(`${label} 超时（${Math.round(timeoutMs / 1000)}s）`)),
+          () => reject(new LiveTimeoutError(`${label} 超时（${Math.round(timeoutMs / 1000)}s）`)),
           timeoutMs,
         )
       }),
@@ -121,6 +134,7 @@ async function runOnce(
   })
 
   const started = Date.now()
+  let timedOut = false
   try {
     const session = ctx.createSession({
       workspace: testCase.workspace,
@@ -128,7 +142,29 @@ async function runOnce(
       input: testCase.input,
     })
 
-    await withTimeout(ctx.runSession(session.id), options.timeoutMs, `${testCase.id} 运行`)
+    const runPromise = ctx.runSession(session.id)
+    try {
+      await withTimeout(runPromise, options.timeoutMs, `${testCase.id} 运行`)
+    } catch (err) {
+      /*
+       * 只有真正的超时才进入「任务还在跑」的分支；其它错误由 finally 正常清理。
+       * 超时只代表「我们不等了」，不代表任务已经停下。此时关掉 SQLite/MCP
+       * 会把它脚下的资源抽走，并可能留下未处理拒绝。让任务自己收敛，
+       * 收敛后再清理这一份临时目录。
+       */
+      if (err instanceof LiveTimeoutError) {
+        timedOut = true
+        pendingCleanups.push(
+          runPromise
+            .catch(() => {})
+            .then(async () => {
+              await ctx.close().catch(() => {})
+              temp.cleanup()
+            }),
+        )
+      }
+      throw err
+    }
 
     const finalSession = ctx.sessions.require(session.id)
     const report = ctx.reports.bySession(session.id)
@@ -153,8 +189,10 @@ async function runOnce(
       },
     }
   } finally {
-    await ctx.close()
-    temp.cleanup()
+    if (!timedOut) {
+      await ctx.close()
+      temp.cleanup()
+    }
   }
 }
 
@@ -426,10 +464,12 @@ async function main(): Promise<void> {
   process.stdout.write(`合计：${results.length - failed.length} PASS / ${failed.length} FAIL\n`)
   process.stdout.write(`报告：${file}\n`)
 
+  await drainPendingCleanups()
   process.exit(failed.length === 0 ? 0 : 1)
 }
 
-main().catch((err: unknown) => {
+main().catch(async (err: unknown) => {
   process.stderr.write(`live 回归失败：${err instanceof Error ? err.message : String(err)}\n`)
+  await drainPendingCleanups()
   process.exit(1)
 })

@@ -9,6 +9,8 @@ export interface ValidationInput {
   conflicts: readonly Conflict[]
   /** 计算阶段已经产生的告警，一并汇总。 */
   warnings: readonly string[]
+  /** 计算阶段的硬错误（例如指标输入匹配到多条结果）。 */
+  errors?: readonly string[]
   /**
    * 必须具备的指标 key。
    *
@@ -36,7 +38,7 @@ export interface ValidationOutcome {
  * 是常态（某事业部未结账），把它当成硬失败会让系统没法用；但当成无事发生更糟。
  */
 export function validateReport(input: ValidationInput): ValidationOutcome {
-  const failures: string[] = []
+  const failures: string[] = [...(input.errors ?? [])]
   const warnings: string[] = [...input.warnings]
 
   const present = new Set(input.metrics.map((m) => m.key))
@@ -63,6 +65,10 @@ export function validateReport(input: ValidationInput): ValidationOutcome {
     }
   }
 
+  // 这里统计的是**本次实际取过数的 Source**，不是 metrics.inputs 里出现的 Source。
+  // monthly-crosscheck 的 reporting-db 结果用于人工核对、不进入指标公式，
+  // 但它确实构成第二个数据源；按 metrics.inputs 统计会把这条正常路径判失败。
+  // 真正的「指标输入是否跨源」需要单独配置，留待后续。
   const sourcesUsed = new Set(input.results.map((r) => r.sourceRef.slug))
   if (sourcesUsed.size < 2) {
     failures.push(

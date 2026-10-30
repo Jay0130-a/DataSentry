@@ -607,7 +607,11 @@ async function runCase(testCase: EvalCase): Promise<CaseOutcome> {
 
 async function main(): Promise<void> {
   const args = process.argv.slice(2)
-  const caseFilter = args.includes('--case') ? args[args.indexOf('--case') + 1] : undefined
+  const rawCaseFilter = args.includes('--case')
+    ? args[args.indexOf('--case') + 1]
+    : undefined
+  // `--case ""` 等同于没有过滤：后面的 loadCases、基线更新、提示必须用同一个判断。
+  const caseFilter = rawCaseFilter?.trim() ? rawCaseFilter : undefined
   const asJson = args.includes('--json')
   const verbose = args.includes('--verbose')
   const noReport = args.includes('--no-report')
@@ -657,7 +661,9 @@ async function main(): Promise<void> {
     baseline: diff,
   }
 
-  const pathsWritten = noReport ? null : writeRegressionReport(report, paths)
+  const pathsWritten = noReport
+    ? null
+    : writeRegressionReport(report, paths, caseFilter === undefined)
 
   if (asJson) {
     process.stdout.write(`${JSON.stringify(report, null, 2)}\n`)
@@ -715,7 +721,11 @@ async function main(): Promise<void> {
     process.stdout.write(`合计：${passed} PASS / ${outcomes.length - passed} FAIL\n`)
     if (pathsWritten) {
       process.stdout.write(`报告：${pathsWritten.runPath}\n`)
-      process.stdout.write(`基线：${pathsWritten.latestPath}\n`)
+      process.stdout.write(
+        caseFilter
+          ? '基线：（--case 过滤运行不更新）\n'
+          : `基线：${pathsWritten.latestPath}\n`,
+      )
     } else {
       process.stdout.write('（--no-report：未写出报告）\n')
     }

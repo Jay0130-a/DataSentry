@@ -1,5 +1,5 @@
 import { existsSync, readFileSync } from 'node:fs'
-import { dirname, join, resolve } from 'node:path'
+import { basename, dirname, join, resolve } from 'node:path'
 
 /**
  * 仓库路径解析。
@@ -7,6 +7,30 @@ import { dirname, join, resolve } from 'node:path'
  * 回归样本需要把状态库、事件轨迹、产物都写进独立的临时目录，否则样本之间会互相污染，
  * 「重启恢复」这类用例也没法构造。所以所有路径都从 `DataPaths` 出，不接受硬编码。
  */
+/**
+ * 一个字符串能否安全地作为单个路径段（文件名、目录名、Workspace 引用）。
+ *
+ * 除了 `/`、`\`、`..`，还要挡住 Windows 上会被解释成别的东西的写法：
+ * 保留设备名、结尾的点或空格、`:` 数据流、控制字符。
+ */
+const WINDOWS_RESERVED_NAME = /^(con|prn|aux|nul|com[1-9]|lpt[1-9])(\..*)?$/i
+
+export function isSafePathSegment(value: string): boolean {
+  return (
+    value.length > 0 &&
+    value !== '.' &&
+    value !== '..' &&
+    basename(value) === value &&
+    !value.includes('/') &&
+    !value.includes('\\') &&
+    !value.includes(':') &&
+    !/[\u0000-\u001f]/.test(value) &&
+    !value.endsWith('.') &&
+    !value.endsWith(' ') &&
+    !WINDOWS_RESERVED_NAME.test(value)
+  )
+}
+
 export interface DataPaths {
   /** 仓库根目录（含 workspaces 字段的 package.json 所在处） */
   root: string

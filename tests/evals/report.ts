@@ -128,6 +128,7 @@ export function diffWithBaseline(
 export function writeRegressionReport(
   report: RegressionReport,
   paths: DataPaths = dataPaths(),
+  updateLatest = true,
 ): { runPath: string; latestPath: string } {
   const dir = reportDir(paths)
   mkdirSync(dir, { recursive: true })
@@ -137,7 +138,9 @@ export function writeRegressionReport(
 
   const payload = `${JSON.stringify(report, null, 2)}\n`
   writeFileSync(runPath, payload, 'utf8')
-  writeFileSync(latest, payload, 'utf8')
+  // 过滤运行（--case）只覆盖单条样本，不能拿它当全量基线；
+  // 否则下一次全量回归会把其它样本都报成 missing。
+  if (updateLatest) writeFileSync(latest, payload, 'utf8')
 
   return { runPath, latestPath: latest }
 }

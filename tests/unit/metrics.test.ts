@@ -85,6 +85,26 @@ describe('指标规则', () => {
     expect(computed.conflicts).toEqual([])
   })
 
+  it('同一工具匹配到多条结果时报告歧义，不静默取第一条', () => {
+    const duplicate: ToolResult = { ...revenue, resultId: 'res_erp_revenue_2' }
+    const results = [revenue, duplicate, cost]
+    const computed = computeMetrics(results)
+
+    expect(computed.metrics.find((m) => m.key === METRIC_KEYS.revenue)).toBeUndefined()
+    expect(computed.errors.join()).toContain('匹配到 2 条结果')
+
+    const outcome = validateReport({
+      results,
+      metrics: computed.metrics,
+      conflicts: [],
+      warnings: computed.warnings,
+      errors: computed.errors,
+      required: [METRIC_KEYS.cost],
+    })
+    expect(outcome.ok).toBe(false)
+    expect(outcome.failures.join()).toContain('匹配到 2 条结果')
+  })
+
   it('数仓与 ERP 差异超过阈值时判为口径冲突，并保留双方候选值', () => {
     const drifted = warehouse(Math.round(1_000_000 * (1 + CONFLICT_THRESHOLD + 0.01)))
     const computed = computeMetrics([revenue, cost, budget, adjustments, drifted])
@@ -229,6 +249,8 @@ describe('指标输入可配置', () => {
   it('required 来自配置：只要求收入时，缺成本也能通过', () => {
     const computed = computeMetrics([revenue, budget], {
       revenue: { tool: 'erp.fetch_revenue', field: 'totalRevenue' },
+      // 加一个真正被使用的第二个来源，满足交叉核对；required 仍然只要求收入。
+      budgetRevenue: { tool: 'finance.fetch_budget', field: 'totalBudgetRevenue' },
     })
     const outcome = validateReport({
       results: [revenue, budget],

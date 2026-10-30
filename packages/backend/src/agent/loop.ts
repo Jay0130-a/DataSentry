@@ -493,6 +493,7 @@ export class AgentRunner {
       metrics: computed.metrics,
       conflicts: computed.conflicts,
       warnings: computed.warnings,
+      errors: computed.errors,
       required: requiredMetricsOf(state.workspace),
     })
 
