@@ -70,7 +70,7 @@ export function ApprovalsView({ user }: { user: CurrentUser }): React.JSX.Elemen
             {items.map((approval) => (
               <li key={approval.id} className="card">
                 <div className="card-head">
-                  <span className={`badge badge-${approval.kind === 'publish' ? 'waiting' : 'bad'}`}>
+                  <span className={`badge badge-${approval.kind === 'publish' ? 'waiting' : 'neutral'}`}>
                     {approval.kind === 'publish' ? '发布确认' : '取数审批'}
                   </span>
                   <span className="mono">{approval.toolName}</span>

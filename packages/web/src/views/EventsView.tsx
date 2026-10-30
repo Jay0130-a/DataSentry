@@ -208,6 +208,7 @@ export function EventsView({ sessionId }: { sessionId: string }): React.JSX.Elem
           </div>
           <input
             className="input toolbar-search"
+            aria-label="搜索事件"
             placeholder="搜索事件类型或摘要，例如 BLOCKED、审批、revenue"
             value={keyword}
             onChange={(event) => setKeyword(event.target.value)}

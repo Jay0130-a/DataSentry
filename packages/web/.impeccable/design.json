@@ -1,0 +1,226 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-10-30T08:15:00Z",
+  "title": "Design System: DataSentry WebUI",
+  "extensions": {
+    "colorMeta": {
+      "primary": {
+        "role": "primary",
+        "displayName": "Enterprise Blue",
+        "canonical": "#7aa2ff",
+        "tonalRamp": ["#0b1a3a", "#102a5c", "#163b7e", "#1d4ed8", "#3b6be0", "#6b93ea", "#a9c1f5", "#e8f0fe"]
+      },
+      "primary-soft": {
+        "role": "primary",
+        "displayName": "Enterprise Blue Soft",
+        "canonical": "#1b2942",
+        "tonalRamp": ["#0b1020", "#121a2e", "#1b2942", "#24365a", "#33507f", "#5a78b3", "#9bbaff", "#e8f0fe"]
+      },
+      "waiting": {
+        "role": "secondary",
+        "displayName": "Signal Amber",
+        "canonical": "#e5b45c",
+        "tonalRamp": ["#332810", "#5c4a1c", "#8a5a00", "#b07a1f", "#e5b45c", "#edc989", "#f5e0b8", "#fcf1da"]
+      },
+      "ok": {
+        "role": "tertiary",
+        "displayName": "Confirmed Green",
+        "canonical": "#6fd39c",
+        "tonalRamp": ["#0c2417", "#142d1f", "#1c4a31", "#16794a", "#3fa06a", "#6fd39c", "#a8e6c4", "#e3f4ea"]
+      },
+      "bad": {
+        "role": "tertiary",
+        "displayName": "Blocked Red",
+        "canonical": "#ff938a",
+        "tonalRamp": ["#2a0f0d", "#3a1a18", "#6e3330", "#b3261e", "#e05a50", "#ff938a", "#ffc4bf", "#fdeae8"]
+      },
+      "background": {
+        "role": "neutral",
+        "displayName": "Night Ink",
+        "canonical": "#121419",
+        "tonalRamp": ["#121419", "#181b21", "#1d2128", "#2a2f37", "#3b424d", "#626b78", "#a0a7b2", "#e8eaed"]
+      },
+      "surface": {
+        "role": "neutral",
+        "displayName": "Panel",
+        "canonical": "#181b21",
+        "tonalRamp": ["#121419", "#181b21", "#1d2128", "#2a2f37", "#3b424d", "#626b78", "#a0a7b2", "#e8eaed"]
+      },
+      "text-muted": {
+        "role": "neutral",
+        "displayName": "Muted Ledger",
+        "canonical": "#a0a7b2",
+        "tonalRamp": ["#1d2128", "#2a2f37", "#3b424d", "#626b78", "#7a8494", "#a0a7b2", "#c6ccd4", "#e8eaed"]
+      }
+    },
+    "typographyMeta": {
+      "headline": {
+        "displayName": "Headline",
+        "purpose": "登录页标题；每个页面不重复使用。"
+      },
+      "title": {
+        "displayName": "Title",
+        "purpose": "面板标题，15px/600。"
+      },
+      "body": {
+        "displayName": "Body",
+        "purpose": "基础 UI 文案，14px/400。"
+      },
+      "data": {
+        "displayName": "Data",
+        "purpose": "表格与数字，13px，tabular-nums。"
+      },
+      "label": {
+        "displayName": "Label",
+        "purpose": "表头、字段标签、元数据，12px/500。"
+      },
+      "mono": {
+        "displayName": "Mono",
+        "purpose": "ID、哈希、时间戳、事件类型、错误码。"
+      }
+    },
+    "motion": [
+      {
+        "name": "ease-out",
+        "value": "cubic-bezier(0.22, 1, 0.36, 1)",
+        "purpose": "Hover / focus / active 状态过渡。"
+      },
+      {
+        "name": "duration-fast",
+        "value": "120ms",
+        "purpose": "颜色与边框过渡。"
+      },
+      {
+        "name": "duration-base",
+        "value": "180ms",
+        "purpose": "预留给更大的状态变化，当前未使用。"
+      }
+    ],
+    "breakpoints": [
+      {
+        "name": "topbar-wrap",
+        "value": "960px"
+      },
+      {
+        "name": "compact",
+        "value": "760px"
+      }
+    ]
+  },
+  "components": [
+    {
+      "name": "Primary Button",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "主操作，例如发起并执行、批准。",
+      "html": "<button class=\"ds-btn-primary\">发起并执行</button>",
+      "css": ".ds-btn-primary { min-height: 30px; padding: 0 12px; border: 1px solid var(--accent); border-radius: 8px; background: var(--accent); color: var(--accent-contrast); font: inherit; font-size: 13px; font-weight: 500; cursor: pointer; transition: background-color 120ms cubic-bezier(0.22, 1, 0.36, 1), border-color 120ms cubic-bezier(0.22, 1, 0.36, 1); } .ds-btn-primary:hover { background: var(--accent-strong); border-color: var(--accent-strong); } .ds-btn-primary:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; } .ds-btn-primary:disabled { opacity: 0.45; cursor: not-allowed; }"
+    },
+    {
+      "name": "Secondary Button",
+      "kind": "button",
+      "refersTo": "button-secondary",
+      "description": "次要操作，例如刷新、返回任务。",
+      "html": "<button class=\"ds-btn\">刷新</button>",
+      "css": ".ds-btn { min-height: 30px; padding: 0 12px; border: 1px solid var(--border-strong); border-radius: 8px; background: var(--surface); color: var(--text); font: inherit; font-size: 13px; font-weight: 500; cursor: pointer; transition: background-color 120ms cubic-bezier(0.22, 1, 0.36, 1), border-color 120ms cubic-bezier(0.22, 1, 0.36, 1), color 120ms cubic-bezier(0.22, 1, 0.36, 1); } .ds-btn:hover { border-color: var(--accent); color: var(--accent); background: var(--accent-soft); } .ds-btn:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; } .ds-btn:disabled { opacity: 0.45; cursor: not-allowed; }"
+    },
+    {
+      "name": "Input",
+      "kind": "input",
+      "refersTo": "input",
+      "description": "文本输入与搜索；placeholder 使用 text-muted。",
+      "html": "<input class=\"ds-input\" placeholder=\"例如：出 2025 年 9 月的经营月报\" />",
+      "css": ".ds-input { min-height: 30px; padding: 4px 10px; border: 1px solid var(--control-border); border-radius: 8px; background: var(--surface); color: var(--text); font: inherit; font-size: 13px; } .ds-input::placeholder { color: var(--text-muted); opacity: 1; } .ds-input:hover { border-color: var(--control-border-hover); } .ds-input:focus { border-color: var(--accent); outline: 2px solid var(--focus-ring); outline-offset: 2px; } .ds-input:disabled { opacity: 0.55; cursor: not-allowed; }"
+    },
+    {
+      "name": "Waiting Badge",
+      "kind": "chip",
+      "refersTo": "badge-waiting",
+      "description": "等待审批 / 待确认；带同色圆点。",
+      "html": "<span class=\"ds-badge-waiting\">等待审批</span>",
+      "css": ".ds-badge-waiting { display: inline-flex; align-items: center; gap: 5px; min-height: 20px; padding: 1px 8px; border: 1px solid var(--waiting-border); border-radius: 999px; background: var(--waiting-soft); color: var(--waiting); font-size: 12px; font-weight: 500; line-height: 16px; white-space: nowrap; } .ds-badge-waiting::before { content: \"\"; width: 5px; height: 5px; border-radius: 50%; background: currentColor; flex: none; }"
+    },
+    {
+      "name": "Active Nav Item",
+      "kind": "nav",
+      "refersTo": "nav-item-active",
+      "description": "顶栏当前页签；未激活为 muted 文字。",
+      "html": "<button class=\"ds-nav-item is-active\">任务</button>",
+      "css": ".ds-nav-item { border: 1px solid transparent; background: transparent; color: var(--text-muted); padding: 6px 12px; border-radius: 6px; font: inherit; font-size: 13px; font-weight: 500; cursor: pointer; transition: background-color 120ms cubic-bezier(0.22, 1, 0.36, 1), color 120ms cubic-bezier(0.22, 1, 0.36, 1); } .ds-nav-item:hover { color: var(--text); background: var(--hover); } .ds-nav-item.is-active { color: var(--accent); background: var(--accent-soft); } .ds-nav-item:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }"
+    },
+    {
+      "name": "Panel",
+      "kind": "card",
+      "refersTo": "panel",
+      "description": "页面主容器；头部 12px 16px，主体 16px。",
+      "html": "<section class=\"ds-panel\"><header class=\"ds-panel-head\"><h2>任务</h2></header><div class=\"ds-panel-body\">面板内容</div></section>",
+      "css": ".ds-panel { border: 1px solid var(--border); border-radius: 10px; background: var(--surface); overflow: hidden; } .ds-panel-head { padding: 12px 16px; border-bottom: 1px solid var(--border); } .ds-panel-head h2 { margin: 0; font-size: 15px; font-weight: 600; line-height: 1.35; } .ds-panel-body { padding: 16px; overflow-x: auto; }"
+    },
+    {
+      "name": "Data Table",
+      "kind": "custom",
+      "description": "高密度表格；表头落在 sunken 层，数字右对齐。",
+      "html": "<table class=\"ds-table\"><thead><tr><th scope=\"col\">状态</th><th scope=\"col\">需求</th></tr></thead><tbody><tr><td><span class=\"ds-badge-waiting\">等待审批</span></td><td>2025-09 经营月报</td></tr></tbody></table>",
+      "css": ".ds-table { width: 100%; min-width: 760px; border-collapse: collapse; font-size: 13px; } .ds-table th { padding: 6px 10px; text-align: left; background: var(--surface-sunken); color: var(--text-muted); font-size: 12px; font-weight: 500; letter-spacing: 0.01em; white-space: nowrap; border-bottom: 1px solid var(--border); } .ds-table td { padding: 6px 10px; border-bottom: 1px solid var(--border); vertical-align: top; } .ds-table tbody tr:last-child td { border-bottom: none; } .ds-table .num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }"
+    }
+  ],
+  "narrative": {
+    "northStar": "运维账本",
+    "overview": "DataSentry 是一个工作台，不是营销页。界面要像一本可对账的运营账本：每个状态、绑定和回执都能被核对。密度是功能，克制是品牌。系统把 12 个任务状态压成四个视觉族（running / ok / waiting / bad），等宽字体只用于机器标识。深色是基线，因为运维人员会长时间盯着屏幕；浅色是同一套语义的镜像回退。表面保持平面，用 1px 边框和色调分层表达深度，不靠投影。",
+    "keyCharacteristics": [
+      "高密度：13px 表格、30px 控件、单行 34.5px、双行 48.7px。",
+      "状态族有颜色，也有文字与圆点，不依赖颜色单独传达。",
+      "一套系统无衬线承担全部 UI；等宽只服务数据。",
+      "平面、色调分层，没有装饰性阴影。",
+      "完全离线：只用系统字体，不请求外部字体。"
+    ],
+    "rules": [
+      {
+        "name": "The Signal Scarcity Rule",
+        "body": "蓝色是唯一交互强调色，只出现在主操作、当前选中、焦点和进行中状态；它不做背景铺底，也不做装饰。",
+        "section": "colors"
+      },
+      {
+        "name": "The Waiting-Is-Not-Error Rule",
+        "body": "琥珀表示「需要人做决定」，不是失败。红色只留给阻断、失败、拒绝和破坏性动作。",
+        "section": "colors"
+      },
+      {
+        "name": "The Terminal-Only Rule",
+        "body": "绿色和红色只描述终态；进行中的状态一律是蓝色。",
+        "section": "colors"
+      },
+      {
+        "name": "The One-Family Rule",
+        "body": "不做 display/body 配对。层级靠字号和字重，第二套无衬线只是噪音。",
+        "section": "typography"
+      },
+      {
+        "name": "The Mono-Is-Data Rule",
+        "body": "等宽只用于机器标识和度量值，不用于标题、按钮或中文正文。",
+        "section": "typography"
+      },
+      {
+        "name": "The Flat-By-Default Rule",
+        "body": "需要强调一个表面时，先改色调或边框；不要先加阴影。",
+        "section": "elevation"
+      }
+    ],
+    "dos": [
+      "Do 使用语义 token；:root 之外不写死 hex。",
+      "Do 表格保持 13px、控件保持 30px；密度就是产品。",
+      "Do 琥珀只给等待/审批，红绿只给终态。",
+      "Do 等宽只用于 ID、哈希、时间戳、事件类型和错误码。",
+      "Do 每个可交互元素保留 2px 焦点环和 2px 偏移。",
+      "Do 表头和中性 chip 使用 sunken 层。"
+    ],
+    "donts": [
+      "Don't 在静止状态加阴影，或用玻璃/模糊做装饰。",
+      "Don't 使用渐变文字或超过 1px 的彩色左边条。",
+      "Don't 用红色表示中性类别徽标。",
+      "Don't 给 UI 配第二套 display 字体；一套系统字族就是声音。",
+      "Don't 引入外部字体；部署环境完全离线。",
+      "Don't 让 20px 状态徽标成为状态机的唯一表达。"
+    ]
+  }
+}

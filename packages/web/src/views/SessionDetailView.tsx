@@ -364,6 +364,7 @@ export function SessionDetailView({
                 className="input"
                 value={reviewReason}
                 onChange={(event) => setReviewReason(event.target.value)}
+                aria-label="人工判断依据"
                 placeholder="人工判断依据（会写入事件轨迹）"
                 disabled={reviewBusy}
               />
@@ -387,7 +388,7 @@ export function SessionDetailView({
                 </button>
                 <button
                   type="button"
-                  className="btn"
+                  className="btn btn-danger"
                   disabled={reviewBusy || loadError}
                   onClick={() => void resolveReview('fail')}
                 >
@@ -395,7 +396,7 @@ export function SessionDetailView({
                 </button>
                 <button
                   type="button"
-                  className="btn"
+                  className="btn btn-danger"
                   disabled={reviewBusy || loadError}
                   onClick={() => void resolveReview('block')}
                 >
@@ -415,10 +416,10 @@ export function SessionDetailView({
           <table className="table">
             <thead>
               <tr>
-                <th>指标</th>
-                <th className="num">数值</th>
-                <th>口径</th>
-                <th>完整性</th>
+                <th scope="col">指标</th>
+                <th scope="col" className="num">数值</th>
+                <th scope="col">口径</th>
+                <th scope="col">完整性</th>
               </tr>
             </thead>
             <tbody>
@@ -494,6 +495,7 @@ export function SessionDetailView({
 
             <input
               className="input"
+              aria-label={channel === 'im' ? 'IM 群目标' : '接收人'}
               placeholder={
                 channel === 'im'
                   ? 'IM 群目标（一次一个），例如 board-room'
@@ -537,13 +539,13 @@ export function SessionDetailView({
           <table className="table">
             <thead>
               <tr>
-                <th>状态</th>
-                <th>类型</th>
-                <th>工具</th>
-                <th>绑定</th>
-                <th>审批人</th>
-                <th>有效期至</th>
-                <th />
+                <th scope="col">状态</th>
+                <th scope="col">类型</th>
+                <th scope="col">工具</th>
+                <th scope="col">绑定</th>
+                <th scope="col">审批人</th>
+                <th scope="col">有效期至</th>
+                <th scope="col" />
               </tr>
             </thead>
             <tbody>
@@ -566,12 +568,12 @@ export function SessionDetailView({
           <table className="table">
             <thead>
               <tr>
-                <th className="num">步骤</th>
-                <th>状态</th>
-                <th className="num">版本</th>
-                <th>输出</th>
-                <th>审批</th>
-                <th>时间</th>
+                <th scope="col" className="num">步骤</th>
+                <th scope="col">状态</th>
+                <th scope="col" className="num">版本</th>
+                <th scope="col">输出</th>
+                <th scope="col">审批</th>
+                <th scope="col">时间</th>
               </tr>
             </thead>
             <tbody>
@@ -598,11 +600,11 @@ export function SessionDetailView({
           <table className="table">
             <thead>
               <tr>
-                <th>状态</th>
-                <th>工具</th>
-                <th>参数摘要</th>
-                <th>拒绝码</th>
-                <th>时间</th>
+                <th scope="col">状态</th>
+                <th scope="col">工具</th>
+                <th scope="col">参数摘要</th>
+                <th scope="col">拒绝码</th>
+                <th scope="col">时间</th>
               </tr>
             </thead>
             <tbody>

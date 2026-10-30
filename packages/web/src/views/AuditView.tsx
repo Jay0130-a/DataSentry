@@ -56,12 +56,12 @@ export function AuditView(): React.JSX.Element {
           <table className="table">
             <thead>
               <tr>
-                <th>时间</th>
-                <th>账号</th>
-                <th>事件</th>
-                <th>原因</th>
-                <th>来源</th>
-                <th>客户端</th>
+                <th scope="col">时间</th>
+                <th scope="col">账号</th>
+                <th scope="col">事件</th>
+                <th scope="col">原因</th>
+                <th scope="col">来源</th>
+                <th scope="col">客户端</th>
               </tr>
             </thead>
             <tbody>
