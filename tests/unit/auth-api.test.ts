@@ -77,6 +77,19 @@ describe('HTTP 鉴权', () => {
     }
   })
 
+  it('业务用户不能处置人工复核任务', async () => {
+    const cookie = await loginAs('analyst', 'analyst-pass')
+    const response = await app.inject({
+      method: 'POST',
+      url: '/sessions/whatever/review',
+      headers: { cookie },
+      payload: { resolution: 'block', reason: 'x' },
+    })
+
+    expect(response.statusCode).toBe(403)
+    expect(JSON.parse(response.body).error.code).toBe('FORBIDDEN')
+  })
+
   it('管理员可以访问数据源清单', async () => {
     const cookie = await loginAs('admin', 'admin-pass')
     const response = await app.inject({ method: 'GET', url: '/sources', headers: { cookie } })

@@ -107,6 +107,7 @@ const TRANSITIONS: Record<SessionState, readonly SessionState[]> = {
     SessionState.PAUSED,
   ],
   [SessionState.MANUAL_REVIEW]: [
+    SessionState.PAUSED,
     SessionState.READY,
     SessionState.DONE,
     SessionState.BLOCKED,

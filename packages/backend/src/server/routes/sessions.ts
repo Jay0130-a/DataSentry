@@ -1,4 +1,9 @@
-import { createSessionInputSchema, ErrorCode, fail } from '@datasentry/core'
+import {
+  createSessionInputSchema,
+  ErrorCode,
+  fail,
+  manualReviewInputSchema,
+} from '@datasentry/core'
 import type { FastifyInstance } from 'fastify'
 import type { AppContext } from '../../context.ts'
 import { requireUser } from '../auth-guard.ts'
@@ -89,6 +94,21 @@ export function registerSessionRoutes(app: FastifyInstance, ctx: AppContext): vo
         completeness: result.completeness,
         rowCount: result.meta.rowCount,
       })),
+    }
+  })
+
+  /** 管理员处置 MANUAL_REVIEW：retry / accept / fail / block。 */
+  app.post('/sessions/:id/review', async (request) => {
+    const { id } = request.params as { id: string }
+    requireUser(request)
+    const input = manualReviewInputSchema.parse(request.body ?? {})
+    const session = ctx.resolveManualReview(id, input)
+    return {
+      session: serializeSession(
+        session,
+        ctx.auth.displayNameOf(session.createdBy),
+      ),
+      resolution: input.resolution,
     }
   })
 

@@ -1,5 +1,5 @@
 import { Command } from 'commander'
-import { isDataSentryError } from '@datasentry/core'
+import { isDataSentryError, manualReviewInputSchema } from '@datasentry/core'
 import { createAppContext } from './context.ts'
 import { listWorkspaces } from './workspace/loader.ts'
 
@@ -122,6 +122,25 @@ sessions
           `  ${call.status.padEnd(10)} ${call.toolName}${call.denyCode ? `  ← ${call.denyCode}` : ''}\n`,
         )
       }
+    } finally {
+      await ctx.close()
+    }
+  })
+
+sessions
+  .command('review <sessionId>')
+  .description('处置 MANUAL_REVIEW 任务（管理员）：retry / accept / fail / block')
+  .requiredOption('-r, --resolution <kind>', 'retry | accept | fail | block')
+  .requiredOption('--reason <text>', '人工判断依据（写入事件轨迹）')
+  .action(async (sessionId: string, options: { resolution: string; reason: string }) => {
+    const ctx = await createAppContext()
+    try {
+      const input = manualReviewInputSchema.parse({
+        resolution: options.resolution,
+        reason: options.reason,
+      })
+      const session = ctx.resolveManualReview(sessionId, input)
+      process.stdout.write(`已处置 ${session.id} → ${session.state}\n`)
     } finally {
       await ctx.close()
     }
