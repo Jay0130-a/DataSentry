@@ -16,9 +16,11 @@ import { navigate, useAsync } from '../hooks.ts'
 export function SessionDetailView({
   sessionId,
   user,
+  agentLoop,
 }: {
   sessionId: string
   user: CurrentUser
+  agentLoop: 'legacy' | 'pi'
 }): React.JSX.Element {
   const detail = useAsync(() => api.getSession(sessionId), [sessionId])
   const events = useAsync(() => api.getSessionEvents(sessionId), [sessionId])
@@ -174,6 +176,9 @@ export function SessionDetailView({
     workspaces.data?.find((item) => item.id === session?.workspaceId)?.imTargets ?? []
   const pendingApprovals = (approvals.data ?? []).filter((a) => a.status === 'pending')
   const latestApproval = (approvals.data ?? []).at(-1) ?? null
+  const latestApprovalExpired = latestApproval
+    ? Date.parse(latestApproval.expiresAt) <= Date.now()
+    : false
   /**
    * 加载失败时页面仍可能保留上一次的 data（useAsync 不清空），
    * 此时不能让用户基于「刚刚加载失败」的快照发起发布/确认。
@@ -184,15 +189,19 @@ export function SessionDetailView({
   const awaitingPublishConfirm =
     session?.state === 'WAITING_APPROVAL' &&
     latestApproval?.kind === 'publish' &&
-    latestApproval.status === 'granted'
+    latestApproval.status === 'granted' &&
+    !latestApprovalExpired
   /**
-   * 发布确认过期/被吊销时，恢复执行会被当成「审批被拒」并把会话推到 BLOCKED；
-   * 正确动作是重新发起发布，所以这里要隐藏恢复按钮。
+   * 发布确认过期/被吊销/被拒时，恢复执行会被当成「审批被拒」并把会话推到 BLOCKED；
+   * 正确动作是重新发起发布，所以这里要隐藏恢复按钮。pending 不算 stale。
    */
   const publishApprovalStale =
     session?.state === 'WAITING_APPROVAL' &&
     latestApproval?.kind === 'publish' &&
-    latestApproval.status !== 'granted'
+    (latestApproval.status === 'expired' ||
+      latestApproval.status === 'revoked' ||
+      latestApproval.status === 'denied' ||
+      (latestApproval.status === 'granted' && latestApprovalExpired))
 
   return (
     <div className="stack">
@@ -215,21 +224,36 @@ export function SessionDetailView({
               </button>
             ) : null}
             {session &&
-            (session.state === 'WAITING_APPROVAL' || session.state === 'PAUSED') &&
+            session.state === 'WAITING_APPROVAL' &&
             !awaitingPublishConfirm &&
             !publishApprovalStale ? (
               <button
                 type="button"
                 className="btn btn-primary"
-                disabled={pendingAction !== null || (session.state === 'WAITING_APPROVAL' && pendingApprovals.length > 0)}
-                title={
-                  session.state === 'WAITING_APPROVAL' && pendingApprovals.length > 0
-                    ? '还有待审批项，批准后再恢复'
-                    : undefined
-                }
+                disabled={pendingAction !== null || pendingApprovals.length > 0}
+                title={pendingApprovals.length > 0 ? '还有待审批项，批准后再恢复' : undefined}
                 onClick={() => void run('resume')}
               >
                 {pendingAction === 'resume' ? '恢复中…' : '恢复执行'}
+              </button>
+            ) : null}
+            {session && session.state === 'PAUSED' && agentLoop === 'legacy' ? (
+              <button
+                type="button"
+                className="btn btn-primary"
+                disabled={pendingAction !== null}
+                onClick={() => void run('resume')}
+              >
+                {pendingAction === 'resume' ? '恢复中…' : '恢复执行'}
+              </button>
+            ) : null}
+            {session && session.state === 'PAUSED' && agentLoop === 'pi' ? (
+              <button
+                type="button"
+                className="btn btn-primary"
+                onClick={() => navigate('#/recovery')}
+              >
+                去恢复页执行
               </button>
             ) : null}
             {/* 结果未知时查回执：这条路径永远不会重发，所以随时可按 */}
@@ -340,6 +364,7 @@ export function SessionDetailView({
                 className="input"
                 value={reviewReason}
                 onChange={(event) => setReviewReason(event.target.value)}
+                aria-label="人工判断依据"
                 placeholder="人工判断依据（会写入事件轨迹）"
                 disabled={reviewBusy}
               />
@@ -363,7 +388,7 @@ export function SessionDetailView({
                 </button>
                 <button
                   type="button"
-                  className="btn"
+                  className="btn btn-danger"
                   disabled={reviewBusy || loadError}
                   onClick={() => void resolveReview('fail')}
                 >
@@ -371,7 +396,7 @@ export function SessionDetailView({
                 </button>
                 <button
                   type="button"
-                  className="btn"
+                  className="btn btn-danger"
                   disabled={reviewBusy || loadError}
                   onClick={() => void resolveReview('block')}
                 >
@@ -391,10 +416,10 @@ export function SessionDetailView({
           <table className="table">
             <thead>
               <tr>
-                <th>指标</th>
-                <th className="num">数值</th>
-                <th>口径</th>
-                <th>完整性</th>
+                <th scope="col">指标</th>
+                <th scope="col" className="num">数值</th>
+                <th scope="col">口径</th>
+                <th scope="col">完整性</th>
               </tr>
             </thead>
             <tbody>
@@ -470,6 +495,7 @@ export function SessionDetailView({
 
             <input
               className="input"
+              aria-label={channel === 'im' ? 'IM 群目标' : '接收人'}
               placeholder={
                 channel === 'im'
                   ? 'IM 群目标（一次一个），例如 board-room'
@@ -513,13 +539,13 @@ export function SessionDetailView({
           <table className="table">
             <thead>
               <tr>
-                <th>状态</th>
-                <th>类型</th>
-                <th>工具</th>
-                <th>绑定</th>
-                <th>审批人</th>
-                <th>有效期至</th>
-                <th />
+                <th scope="col">状态</th>
+                <th scope="col">类型</th>
+                <th scope="col">工具</th>
+                <th scope="col">绑定</th>
+                <th scope="col">审批人</th>
+                <th scope="col">有效期至</th>
+                <th scope="col" />
               </tr>
             </thead>
             <tbody>
@@ -542,12 +568,12 @@ export function SessionDetailView({
           <table className="table">
             <thead>
               <tr>
-                <th className="num">步骤</th>
-                <th>状态</th>
-                <th className="num">版本</th>
-                <th>输出</th>
-                <th>审批</th>
-                <th>时间</th>
+                <th scope="col" className="num">步骤</th>
+                <th scope="col">状态</th>
+                <th scope="col" className="num">版本</th>
+                <th scope="col">输出</th>
+                <th scope="col">审批</th>
+                <th scope="col">时间</th>
               </tr>
             </thead>
             <tbody>
@@ -574,11 +600,11 @@ export function SessionDetailView({
           <table className="table">
             <thead>
               <tr>
-                <th>状态</th>
-                <th>工具</th>
-                <th>参数摘要</th>
-                <th>拒绝码</th>
-                <th>时间</th>
+                <th scope="col">状态</th>
+                <th scope="col">工具</th>
+                <th scope="col">参数摘要</th>
+                <th scope="col">拒绝码</th>
+                <th scope="col">时间</th>
               </tr>
             </thead>
             <tbody>
@@ -637,6 +663,7 @@ function ApprovalRow({
   busy: boolean
   onConfirm: (approvalId: string) => void
 }): React.JSX.Element {
+  const expired = Date.parse(approval.expiresAt) <= Date.now()
   return (
     <tr>
       <td>
@@ -661,7 +688,8 @@ function ApprovalRow({
           <button
             type="button"
             className="btn btn-primary"
-            disabled={busy}
+            disabled={busy || expired}
+            title={expired ? '发布确认已过期，请重新发起发布' : undefined}
             onClick={() => onConfirm(approval.id)}
           >
             确认投递

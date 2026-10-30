@@ -101,7 +101,15 @@ export function registerSessionRoutes(app: FastifyInstance, ctx: AppContext): vo
   app.post('/sessions/:id/review', async (request) => {
     const { id } = request.params as { id: string }
     const user = requireUser(request)
-    const input = manualReviewInputSchema.parse(request.body ?? {})
+    const parsed = manualReviewInputSchema.safeParse(request.body ?? {})
+    if (!parsed.success) {
+      fail(
+        ErrorCode.SCHEMA_INVALID,
+        `请求体不合法：${parsed.error.issues[0]?.message ?? '未知错误'}`,
+        { issues: parsed.error.issues },
+      )
+    }
+    const input = parsed.data
     const session = ctx.resolveManualReview(id, input, {
       userId: user.id,
       displayName: user.displayName,

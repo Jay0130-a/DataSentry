@@ -43,11 +43,11 @@ export function SessionsView(): React.JSX.Element {
           <table className="table">
             <thead>
               <tr>
-                <th>状态</th>
-                <th>需求</th>
-                <th className="num">步</th>
-                <th>工作区</th>
-                <th>创建时间</th>
+                <th scope="col">状态</th>
+                <th scope="col">需求</th>
+                <th scope="col" className="num">步</th>
+                <th scope="col">工作区</th>
+                <th scope="col">创建时间</th>
               </tr>
             </thead>
             <tbody>
@@ -55,7 +55,15 @@ export function SessionsView(): React.JSX.Element {
                 <tr
                   key={session.id}
                   className="row-link"
+                  tabIndex={0}
+                  role="link"
                   onClick={() => navigate(`#/sessions/${session.id}`)}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter' || event.key === ' ') {
+                      event.preventDefault()
+                      navigate(`#/sessions/${session.id}`)
+                    }
+                  }}
                 >
                   <td>
                     <StateBadge state={session.state} />
@@ -167,6 +175,7 @@ function NewRequestCard({ onCreated }: { onCreated: () => void }): React.JSX.Ele
         <textarea
           className="input composer-textarea"
           rows={3}
+          aria-label="报表需求"
           placeholder="例如：出 2025 年 9 月的经营月报"
           value={request}
           onChange={(event) => setRequest(event.target.value)}

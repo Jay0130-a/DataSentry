@@ -85,4 +85,22 @@ describe('凭据管理', () => {
       delete process.env['DATASENTRY_CRED_ONLY_IN_ENV']
     }
   })
+
+  it('环境变量覆盖文件凭据时，短值也进入清洗表', () => {
+    temp = tempPaths()
+    mkdirSync(dirname(temp.paths.credentials), { recursive: true })
+    writeFileSync(
+      temp.paths.credentials,
+      JSON.stringify({ 'erp.token': 'file-password-123' }),
+      'utf8',
+    )
+    process.env['DATASENTRY_CRED_ERP_TOKEN'] = 'abc123'
+    try {
+      const manager = CredentialManager.load(temp.paths)
+      expect(manager.get('erp.token')).toBe('abc123')
+      expect(manager.scrub('x abc123 y')).toBe('x ***redacted*** y')
+    } finally {
+      delete process.env['DATASENTRY_CRED_ERP_TOKEN']
+    }
+  })
 })

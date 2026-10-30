@@ -4,6 +4,7 @@ import {
   ErrorCode,
   EventType,
   fail,
+  isDataSentryError,
   SessionState,
   type Approval,
   type CreateSessionInput,
@@ -100,6 +101,8 @@ export interface DecideApprovalInput {
 export interface AppContext {
   readonly paths: DataPaths
   readonly credentials: CredentialManager
+  /** 当前进程使用的 Agent 循环；Web 据此决定 PAUSED 是否能直接恢复。 */
+  readonly agentLoop: 'legacy' | 'pi'
   readonly database: DatabaseHandle
   readonly auth: AuthService
   readonly events: EventStore
@@ -542,6 +545,7 @@ export async function createAppContext(options: AppContextOptions = {}): Promise
   return {
     paths,
     credentials,
+    agentLoop,
     database,
     auth,
     events,
@@ -787,7 +791,24 @@ export async function createAppContext(options: AppContextOptions = {}): Promise
             session.state === SessionState.WAITING_APPROVAL &&
             transcripts.read(sessionId).length > 0
           const outcome = usePi
-            ? await runWithPiLoop(sessionId, options.plan)
+            ? await runWithPiLoop(sessionId, options.plan).catch(async (err) => {
+                /*
+                 * transcript 可能被截断：长度非零但最后一条 assistant 里没有
+                 * 挂起的 toolCall。pi 恢复会以 APPROVAL_INVALID/SESSION_NOT_FOUND
+                 * 失败；这时退回 legacy 的检查点恢复，避免每次 recover 都撞同一堵墙。
+                 */
+                if (
+                  isDataSentryError(err) &&
+                  (err.code === ErrorCode.APPROVAL_INVALID ||
+                    err.code === ErrorCode.SESSION_NOT_FOUND)
+                ) {
+                  return makeRunner({
+                    sessionId,
+                    ...(options.plan ? { plan: options.plan } : {}),
+                  }).run(sessionId)
+                }
+                throw err
+              })
             : await makeRunner({
                 sessionId,
                 ...(options.plan ? { plan: options.plan } : {}),

@@ -49,15 +49,17 @@ export class CredentialManager {
     }
 
     const values = new Map(fileValues)
-    /** 环境变量来源的值单独记一份：它们的熵通常更高，但短值不适合做全文替换。 */
-    const envSecrets: string[] = []
+    /** 覆盖文件凭据的环境变量值：它们替换的是已知密钥，仍按 4 字符下限清洗。 */
+    const overrideSecrets: string[] = []
+    /** 只有环境变量、没有文件条目的值：低熵短值不参与全文替换。 */
+    const extraSecrets: string[] = []
 
     // 环境变量按 core 的命名约定精确反查，不做有损的字符串还原。
     for (const key of [...fileValues.keys()]) {
       const fromEnv = process.env[credentialEnvVar(key)]
       if (fromEnv !== undefined) {
         values.set(key, fromEnv)
-        envSecrets.push(fromEnv)
+        overrideSecrets.push(fromEnv)
       }
     }
 
@@ -71,18 +73,19 @@ export class CredentialManager {
      */
     for (const [name, value] of Object.entries(process.env)) {
       if (value !== undefined && name.toUpperCase().startsWith(CREDENTIAL_ENV_PREFIX)) {
-        envSecrets.push(value)
+        extraSecrets.push(value)
       }
     }
 
     /*
      * 文件里的凭据通常是我们自己生成的长串；环境变量可能是 `finance` 这类
-     * 低熵值，全文替换会把报表正文里的普通单词也替换掉。用 8 字符作为
-     * env-only 值的下限：真正的 token/webhook key 远长于它。
+     * 低熵值，全文替换会把报表正文里的普通单词也替换掉。env-only 用 8 字符
+     * 作为下限；显式覆盖文件凭据的值则按 4 字符处理——它替换的是真实密钥。
      */
     const secrets = [
       ...[...fileValues.values()].filter((value) => value.length >= 4),
-      ...envSecrets.filter((value) => value.length >= 8),
+      ...overrideSecrets.filter((value) => value.length >= 4),
+      ...extraSecrets.filter((value) => value.length >= 8),
     ]
     return new CredentialManager(values, secrets)
   }

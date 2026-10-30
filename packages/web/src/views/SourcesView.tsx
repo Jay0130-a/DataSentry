@@ -51,11 +51,11 @@ export function SourcesView(): React.JSX.Element {
               <table className="table table-compact">
                 <thead>
                   <tr>
-                    <th>工具</th>
-                    <th>说明</th>
-                    <th>敏感级别</th>
-                    <th>副作用</th>
-                    <th>需读 guide</th>
+                    <th scope="col">工具</th>
+                    <th scope="col">说明</th>
+                    <th scope="col">敏感级别</th>
+                    <th scope="col">副作用</th>
+                    <th scope="col">需读 guide</th>
                   </tr>
                 </thead>
                 <tbody>

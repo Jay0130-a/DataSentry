@@ -252,7 +252,6 @@ export class PublishService {
       channel: request.channel,
       format: request.format,
     })
-    const updatedReport = reports.patch(report.id, { recipientsHash })
 
     const imTargetKey =
       request.channel === 'im'
@@ -301,6 +300,9 @@ export class PublishService {
      */
     const supersededCalls = this.supersedePendingPublishCalls(session, toolCalls, approvals)
     const revoked = approvals.revokePending(session.id, 'publish')
+
+    // 所有可能失败的检查都过了，才改写报表的绑定摘要；否则替换失败会把旧确认一起弄坏。
+    const updatedReport = reports.patch(report.id, { recipientsHash })
 
     const toolCall = toolCalls.create({
       sessionId: session.id,
@@ -384,15 +386,6 @@ export class PublishService {
       return { status: 'pending', approvalId }
     }
 
-    // 人工复核/失败/阻塞等状态不能继续投递：审批记录还在，但任务已经被关掉。
-    if (session.state !== SessionState.WAITING_APPROVAL) {
-      fail(
-        ErrorCode.ILLEGAL_STATE_TRANSITION,
-        `Session ${session.id} 当前状态为 ${session.state}，不能确认发布`,
-        { sessionId: session.id, state: session.state, approvalId },
-      )
-    }
-
     if (approval.status !== ApprovalStatus.GRANTED) {
       fail(
         approval.status === ApprovalStatus.EXPIRED
@@ -400,6 +393,16 @@ export class PublishService {
           : ErrorCode.APPROVAL_INVALID,
         `发布确认 ${approvalId} 当前状态为 ${approval.status}，不能执行`,
         { approvalId, status: approval.status },
+      )
+    }
+
+    // 人工复核/失败/阻塞等状态不能继续投递：审批记录还在，但任务已经被关掉。
+    // 放在状态检查之后，才能让已过期的审批报 APPROVAL_EXPIRED 而不是状态错误。
+    if (session.state !== SessionState.WAITING_APPROVAL && session.state !== SessionState.READY) {
+      fail(
+        ErrorCode.ILLEGAL_STATE_TRANSITION,
+        `Session ${session.id} 当前状态为 ${session.state}，不能确认发布`,
+        { sessionId: session.id, state: session.state, approvalId },
       )
     }
 
@@ -622,7 +625,10 @@ export class PublishService {
     }
 
     const current = sessions.require(session.id)
-    if (current.state === SessionState.WAITING_APPROVAL) {
+    if (
+      current.state === SessionState.WAITING_APPROVAL ||
+      current.state === SessionState.READY
+    ) {
       this.transition(current, SessionState.DONE)
     }
     return published

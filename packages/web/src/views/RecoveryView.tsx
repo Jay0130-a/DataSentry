@@ -91,11 +91,11 @@ export function RecoveryView(): React.JSX.Element {
           <table className="table">
             <thead>
               <tr>
-                <th>状态</th>
-                <th>任务</th>
-                <th className="num">已完成</th>
-                <th>最后检查点</th>
-                <th>恢复结论</th>
+                <th scope="col">状态</th>
+                <th scope="col">任务</th>
+                <th scope="col" className="num">已完成</th>
+                <th scope="col">最后检查点</th>
+                <th scope="col">恢复结论</th>
               </tr>
             </thead>
             <tbody>

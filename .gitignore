@@ -24,3 +24,6 @@ npm-debug.log*
 .DS_Store
 Thumbs.db
 *.tsbuildinfo
+
+# Impeccable 本地会话缓存（含机器路径）
+packages/web/.impeccable/hook.cache.json

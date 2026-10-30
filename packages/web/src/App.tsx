@@ -154,7 +154,12 @@ export function App(): React.JSX.Element {
 
         {!denied && route.name === 'sessions' && <SessionsView />}
         {!denied && route.name === 'session' && (
-          <SessionDetailView key={route.id} sessionId={route.id} user={user} />
+          <SessionDetailView
+            key={route.id}
+            sessionId={route.id}
+            user={user}
+            agentLoop={meta.data?.agentLoop ?? 'legacy'}
+          />
         )}
         {!denied && route.name === 'session-events' && (
           <EventsView key={route.id} sessionId={route.id} />

@@ -612,6 +612,7 @@ async function main(): Promise<void> {
     : undefined
   // `--case ""` 等同于没有过滤：后面的 loadCases、基线更新、提示必须用同一个判断。
   const caseFilter = rawCaseFilter?.trim() ? rawCaseFilter : undefined
+  const runner = process.env['DATASENTRY_AGENT_LOOP'] === 'pi' ? 'pi' : 'legacy'
   const asJson = args.includes('--json')
   const verbose = args.includes('--verbose')
   const noReport = args.includes('--no-report')
@@ -663,7 +664,7 @@ async function main(): Promise<void> {
 
   const pathsWritten = noReport
     ? null
-    : writeRegressionReport(report, paths, caseFilter === undefined)
+    : writeRegressionReport(report, paths, caseFilter === undefined && runner === 'legacy')
 
   if (asJson) {
     process.stdout.write(`${JSON.stringify(report, null, 2)}\n`)
@@ -724,7 +725,9 @@ async function main(): Promise<void> {
       process.stdout.write(
         caseFilter
           ? '基线：（--case 过滤运行不更新）\n'
-          : `基线：${pathsWritten.latestPath}\n`,
+          : runner === 'pi'
+            ? '基线：（pi 循环运行不更新）\n'
+            : `基线：${pathsWritten.latestPath}\n`,
       )
     } else {
       process.stdout.write('（--no-report：未写出报告）\n')

@@ -58,12 +58,22 @@ export interface PublishReceipt {
  * 信封被拒、企微平台返回 errcode。超时、socket 中断、发送后 5xx 都属于
  * 「可能已经到达对方」——intent 必须保留，下一次以 RECEIPT_UNKNOWN 拦下。
  */
+/** 取错误码，undici/fetch 会把真正的 code 放在 `cause` 上。 */
+function errorCodeOf(err: unknown): string | undefined {
+  if (!err || typeof err !== 'object') return undefined
+  const code = (err as { code?: unknown }).code
+  if (typeof code === 'string') return code
+  const cause = (err as { cause?: unknown }).cause
+  return cause && cause !== err ? errorCodeOf(cause) : undefined
+}
+
 export function isDefinitelyNotDelivered(err: unknown, channel: string): boolean {
   if (err instanceof ToolExecutionError) return true
 
-  const code = (err as { code?: unknown }).code
+  const code = errorCodeOf(err)
   const message = err instanceof Error ? err.message : ''
-  // nodemailer 会把连接阶段的 ECONNREFUSED 包成 ESOCKET，真正的错误码在 message 里。
+  // nodemailer 会把连接阶段的 ECONNREFUSED 包成 ESOCKET，真正的错误码在 message 里；
+  // fetch 则把 ENOTFOUND/ECONNREFUSED 放在 err.cause。
   const refused =
     code === 'ECONNREFUSED' ||
     code === 'ENOTFOUND' ||
