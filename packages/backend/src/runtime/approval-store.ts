@@ -294,9 +294,28 @@ export class ApprovalStore {
     return result.changes
   }
 
-  /** 借据式作废：草稿被重算或接收人变更时，旧的发布确认要显式吊销。 */
-  revokePending(sessionId: string, kind: 'publish'): number {
+  /**
+   * 关闭会话上的所有未决审批。
+   *
+   * 人工处置会把任务移出 MANUAL_REVIEW，旧的工具/发布审批不应再能执行。
+   * 返回吊销条数。
+   */
+  revokeAll(sessionId: string): number {
     const result = this.db
+      .update(schema.approvals)
+      .set({ status: ApprovalStatus.REVOKED, decidedAt: new Date().toISOString() })
+      .where(
+        and(
+          eq(schema.approvals.sessionId, sessionId),
+          inArray(schema.approvals.status, [ApprovalStatus.PENDING, ApprovalStatus.GRANTED]),
+        ),
+      )
+      .run()
+    return result.changes
+  }
+
+  /** 借据式作废：草稿被重算或接收人变更时，旧的发布确认要显式吊销。 */
+  revokePending(sessionId: string, kind: 'publish'): number {    const result = this.db
       .update(schema.approvals)
       .set({ status: ApprovalStatus.REVOKED, decidedAt: new Date().toISOString() })
       .where(

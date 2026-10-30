@@ -384,6 +384,15 @@ export class PublishService {
       return { status: 'pending', approvalId }
     }
 
+    // 人工复核/失败/阻塞等状态不能继续投递：审批记录还在，但任务已经被关掉。
+    if (session.state !== SessionState.WAITING_APPROVAL) {
+      fail(
+        ErrorCode.ILLEGAL_STATE_TRANSITION,
+        `Session ${session.id} 当前状态为 ${session.state}，不能确认发布`,
+        { sessionId: session.id, state: session.state, approvalId },
+      )
+    }
+
     if (approval.status !== ApprovalStatus.GRANTED) {
       fail(
         approval.status === ApprovalStatus.EXPIRED

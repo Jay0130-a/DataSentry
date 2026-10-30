@@ -55,6 +55,25 @@ export const createSessionInputSchema = z.object({
 
 export type CreateSessionInput = z.infer<typeof createSessionInputSchema>
 
+/**
+ * `MANUAL_REVIEW` 的人工处置。
+ *
+ * - `retry`：回到 PAUSED，由恢复/执行入口从检查点继续
+ * - `accept`：接受当前报表产物，直接结清为 DONE
+ * - `fail`：确认任务失败
+ * - `block`：保留现场，转 BLOCKED 等进一步处理
+ */
+export const manualReviewResolutionSchema = z.enum(['retry', 'accept', 'fail', 'block'])
+
+export const manualReviewInputSchema = z.object({
+  resolution: manualReviewResolutionSchema,
+  /** 人工判断的依据；审计轨迹会原样记录。 */
+  reason: z.string().trim().min(1),
+})
+
+export type ManualReviewResolution = z.infer<typeof manualReviewResolutionSchema>
+export type ManualReviewInput = z.infer<typeof manualReviewInputSchema>
+
 /** tool_call：一次工具调用的记录（PRD §7）。 */
 export const toolCallSchema = z.object({
   id: z.string().min(1),

@@ -46,6 +46,7 @@ const ADMIN_ROUTES: ReadonlySet<string> = new Set([
   'GET /tools',
   'GET /recovery',
   'POST /recovery',
+  'POST /sessions/:id/review',
   'GET /auth/audit',
 ])
 

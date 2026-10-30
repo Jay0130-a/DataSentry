@@ -1,5 +1,6 @@
 import { ErrorCode, isDataSentryError } from '@datasentry/core'
 import type { FastifyInstance } from 'fastify'
+import { ZodError } from 'zod'
 
 const STATUS_BY_CODE: Partial<Record<ErrorCode, number>> = {
   [ErrorCode.WORKSPACE_NOT_FOUND]: 404,
@@ -54,6 +55,20 @@ export function registerErrorHandler(app: FastifyInstance): void {
       const status = STATUS_BY_CODE[error.code] ?? 400
       return reply.code(status).send({
         error: { code: error.code, message: error.message, details: error.details },
+      })
+    }
+
+    // 路由层用 Zod 校验请求体；它是调用方的输入错误，不能落成 500。
+    if (error instanceof ZodError) {
+      const first = error.issues[0]
+      return reply.code(400).send({
+        error: {
+          code: ErrorCode.SCHEMA_INVALID,
+          message: first
+            ? `${first.path.join('.') || '请求体'}：${first.message}`
+            : '请求参数不合法',
+          details: { issues: error.issues },
+        },
       })
     }
 

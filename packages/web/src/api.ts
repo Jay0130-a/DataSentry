@@ -315,6 +315,15 @@ export const api = {
       { method: 'POST' },
     ),
 
+  resolveManualReview: (
+    id: string,
+    input: { resolution: 'retry' | 'accept' | 'fail' | 'block'; reason: string },
+  ) =>
+    request<{ session: SessionSummary; resolution: string }>(`/sessions/${id}/review`, {
+      method: 'POST',
+      body: JSON.stringify(input),
+    }),
+
   runSession: (id: string) =>
     request<{ sessionId: string; state: SessionState; steps: number }>(`/sessions/${id}/run`, {
       method: 'POST',

@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { api, PUBLISH_FORMAT_OPTIONS, type Approval, type PublishFormat, type SessionDetail } from '../api.ts'
+import { type CurrentUser } from '../auth.ts'
 import {
   Empty,
   ErrorBox,
@@ -12,7 +13,13 @@ import {
 } from '../components.tsx'
 import { navigate, useAsync } from '../hooks.ts'
 
-export function SessionDetailView({ sessionId }: { sessionId: string }): React.JSX.Element {
+export function SessionDetailView({
+  sessionId,
+  user,
+}: {
+  sessionId: string
+  user: CurrentUser
+}): React.JSX.Element {
   const detail = useAsync(() => api.getSession(sessionId), [sessionId])
   const events = useAsync(() => api.getSessionEvents(sessionId), [sessionId])
   const report = useAsync(() => api.getSessionReport(sessionId), [sessionId])
@@ -30,6 +37,12 @@ export function SessionDetailView({ sessionId }: { sessionId: string }): React.J
   const [publishMsg, setPublishMsg] = useState<string | null>(null)
   const [publishError, setPublishError] = useState<string | null>(null)
   const [publishBusy, setPublishBusy] = useState(false)
+
+  // —— 人工复核 ——
+  const [reviewReason, setReviewReason] = useState('')
+  const [reviewBusy, setReviewBusy] = useState(false)
+  const [reviewMsg, setReviewMsg] = useState<string | null>(null)
+  const [reviewError, setReviewError] = useState<string | null>(null)
 
   const reloadAll = (): void => {
     detail.reload()
@@ -90,6 +103,32 @@ export function SessionDetailView({ sessionId }: { sessionId: string }): React.J
       setPublishError(err instanceof Error ? err.message : String(err))
     } finally {
       setPublishBusy(false)
+    }
+  }
+
+  const resolveReview = async (
+    resolution: 'retry' | 'accept' | 'fail' | 'block',
+  ): Promise<void> => {
+    const reason = reviewReason.trim()
+    if (!reason) {
+      setReviewError('请填写人工判断依据')
+      return
+    }
+    setReviewBusy(true)
+    setReviewError(null)
+    setReviewMsg(null)
+    try {
+      const result = await api.resolveManualReview(sessionId, { resolution, reason })
+      setReviewMsg(
+        `已处置为 ${result.session.state}` +
+          (resolution === 'retry' ? '；请到恢复页执行或等待恢复扫描' : ''),
+      )
+      setReviewReason('')
+      reloadAll()
+    } catch (err) {
+      setReviewError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setReviewBusy(false)
     }
   }
 
@@ -221,6 +260,8 @@ export function SessionDetailView({ sessionId }: { sessionId: string }): React.J
         ) : null}
         {actionError ? <ErrorBox message={actionError} /> : null}
         {reconcileResult ? <div className="callout callout-ok">{reconcileResult}</div> : null}
+        {reviewError ? <ErrorBox message={reviewError} /> : null}
+        {reviewMsg ? <div className="callout callout-ok">{reviewMsg}</div> : null}
         {awaitingPublishConfirm ? (
           <div className="callout">
             发布确认已通过。投递的执行入口是下方审批表里的「确认投递」——那一步会重新核对文件字节、
@@ -283,6 +324,64 @@ export function SessionDetailView({ sessionId }: { sessionId: string }): React.J
           </>
         ) : null}
       </Panel>
+
+      {session?.state === 'MANUAL_REVIEW' ? (
+        <Panel
+          title="人工复核"
+          subtitle="任务停在 MANUAL_REVIEW：由管理员记录判断依据后选择处置方式。"
+        >
+          {user.role !== 'admin' ? (
+            <div className="callout">
+              需要管理员身份处置；请让管理员在任务详情页或使用 CLI `sessions review` 执行。
+            </div>
+          ) : (
+            <div className="stack">
+              <input
+                className="input"
+                value={reviewReason}
+                onChange={(event) => setReviewReason(event.target.value)}
+                placeholder="人工判断依据（会写入事件轨迹）"
+                disabled={reviewBusy}
+              />
+              <div className="composer-row">
+                <button
+                  type="button"
+                  className="btn"
+                  disabled={reviewBusy || loadError}
+                  onClick={() => void resolveReview('retry')}
+                >
+                  重试（转 PAUSED）
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-primary"
+                  disabled={reviewBusy || loadError || !report.data}
+                  title={!report.data ? '没有可接受的报表产物' : undefined}
+                  onClick={() => void resolveReview('accept')}
+                >
+                  接受当前草稿（DONE）
+                </button>
+                <button
+                  type="button"
+                  className="btn"
+                  disabled={reviewBusy || loadError}
+                  onClick={() => void resolveReview('fail')}
+                >
+                  判定失败（FAILED）
+                </button>
+                <button
+                  type="button"
+                  className="btn"
+                  disabled={reviewBusy || loadError}
+                  onClick={() => void resolveReview('block')}
+                >
+                  转 BLOCKED
+                </button>
+              </div>
+            </div>
+          )}
+        </Panel>
+      ) : null}
 
       {report.data ? (
         <Panel
